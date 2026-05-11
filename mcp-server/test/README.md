@@ -9,7 +9,7 @@ This directory contains tests for the fallback-agent MCP plugin.
 Free to run, no API costs. Tests helper utilities and pure functions.
 
 ```bash
-bun run test
+npm test
 ```
 
 ### Integration Tests
@@ -23,14 +23,8 @@ Integration tests verify the full nested subagent functionality:
 3. **Level 3 - Nested**: Claude uses the plugin's MCP tool to spawn an outer agent, which spawns an inner agent
 
 ```bash
-bun run test:integration
+npm run test:integration
 ```
-
-## Important: Use `bun run test`, not `bun test`
-
-⚠️ **Do not use `bun test`** - that invokes bun's native test runner which has 5-second timeouts and won't work with our vitest configuration.
-
-Always use `bun run test` to run vitest with proper timeouts.
 
 ## Test Configuration
 
@@ -44,22 +38,22 @@ Tests use these settings to minimize costs:
 
 ```bash
 # Run only unit tests
-bun run test
+npm test
 
 # Run only integration tests
-bun run test:integration
+npm run test:integration
 
 # Run a specific test file
-bun run test -- test/helpers.test.ts
+npm test -- test/helpers.test.ts
 
 # Run tests matching a pattern
-bun run test -- --grep "extractText"
+npm test -- --grep "extractText"
 
 # Watch mode (unit tests only)
-bun run test:watch
+npm run test:watch
 
-# Alternative: use bunx directly
-bunx vitest run test/helpers.test.ts
+# Alternative: use npx directly
+npx vitest run test/helpers.test.ts
 ```
 
 ## Test Structure
@@ -124,9 +118,9 @@ Example CI workflow:
 
 ```yaml
 # Run unit tests always
-- run: bun run test
+- run: npm test
 
 # Run integration tests only on main branch or manual trigger
-- run: bun run test:integration
+- run: npm run test:integration
   if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
 ```

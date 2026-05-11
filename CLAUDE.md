@@ -17,33 +17,31 @@ The repo, plugin, and MCP server all use slightly different names — keep them 
 
 ## Commands
 
-All commands run from `mcp-server/`. The scripts are written for `bun` (preferred — matches CI/repo conventions); if `bun` isn't installed, the same scripts work under `npm run …` because every script just shells out to a `devDependency` (`tsdown`, `tsc`, `tsx`, `vitest`).
+All commands run from `mcp-server/`. The project uses `npm` (canonical lockfile: `package-lock.json`); every script just shells out to a `devDependency` (`tsdown`, `tsc`, `tsx`, `vitest`).
 
 ### Required tooling
 
 - `claude` CLI on `PATH` — the MCP server spawns `claude -p` for each nested task. Without it the tool returns `Failed to spawn`.
 - Node.js `>= 18` — runtime for the bundled `dist/index.mjs`.
-- `bun` **or** `npm` — package manager + script runner. `bun install` / `npm install` populate `node_modules` with `tsdown`, `tsc`, `tsx`, `vitest`.
+- `npm` — package manager + script runner. `npm install` populates `node_modules` with `tsdown`, `tsc`, `tsx`, `vitest`.
 
 ### Build & dev
 
 ```bash
-bun run build      # Bundle via tsdown → dist/index.mjs (single ESM file, all deps inlined)
-bun run dev        # Run server directly with tsx
-bun run typecheck  # tsc --noEmit
+npm run build      # Bundle via tsdown → dist/index.mjs (single ESM file, all deps inlined)
+npm run dev        # Run server directly with tsx
+npm run typecheck  # tsc --noEmit
 ```
 
 ### Tests
 
 ```bash
-bun run test                            # Unit tests (free, no Claude spawns)
-bun run test:watch                      # Unit watch mode
-bun run test:integration                # Integration tests — spawns real `claude` processes; costs $$
-bun run test -- test/helpers.test.ts    # Single file
-bun run test -- --grep "extractText"    # Pattern match
+npm test                                # Unit tests (free, no Claude spawns)
+npm run test:watch                      # Unit watch mode
+npm run test:integration                # Integration tests — spawns real `claude` processes; costs $$
+npm test -- test/helpers.test.ts        # Single file
+npm test -- --grep "extractText"        # Pattern match
 ```
-
-**Never run `bun test`.** That invokes bun's native test runner with a 5-second timeout and ignores the vitest config — use `bun run test` (which delegates to vitest).
 
 Integration tests pin to `model: "haiku"` with low `maxTurns` to bound cost; they run serially in a single fork (see `vitest.integration.config.ts`).
 
@@ -55,7 +53,7 @@ claude /plugin install ./nested-subagent       # Local install
 # Or add marketplace `gruckion/nested-subagent` via the /plugin UI
 ```
 
-The marketplace entry points at `mcp-server/dist/index.mjs`, so `bun run build` is required before installs pick up code changes.
+The marketplace entry points at `mcp-server/dist/index.mjs`, so `npm run build` is required before installs pick up code changes.
 
 ## Architecture
 

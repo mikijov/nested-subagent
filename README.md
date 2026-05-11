@@ -16,7 +16,7 @@ Enable **unlimited nested subagents** in Claude Code. Subagents can spawn their 
 |------|---------|-----------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup) (`claude` on `PATH`) | `>= 1.0.33` | The plugin's MCP server spawns `claude -p` for each nested session. |
 | [Node.js](https://nodejs.org/) | `>= 18` | Runs the built `dist/index.mjs` once the plugin is installed. |
-| [npm](https://www.npmjs.com/) **or** [Bun](https://bun.sh/) | latest | Installs deps and runs the build/test scripts. The dev commands in this repo are written for `bun`; substitute `npm run` if you don't have Bun. |
+| [npm](https://www.npmjs.com/) | latest | Installs deps and runs the build/test scripts. |
 | [git](https://git-scm.com/) | any | Required for the local-install path below. |
 
 Marketplace installs only need `claude` and `node` — the bundled `dist/index.mjs` is shipped pre-built. The other tools are only required when building from source.
