@@ -21,7 +21,7 @@ Create or edit `.claude/settings.local.json` in your project and add permissions
 Allow the MCP tool to spawn nested subagents:
 
 ```json
-"mcp__plugin_fallback-agent_fallback__Task"
+"mcp__plugin_nested-subagent_nested__Task"
 ```
 
 ## Development Commands
@@ -62,7 +62,7 @@ Minimal setup for using the nested-subagent plugin:
 {
   "permissions": {
     "allow": [
-      "mcp__plugin_fallback-agent_fallback__Task",
+      "mcp__plugin_nested-subagent_nested__Task",
       "Bash(node:*)"
     ]
   }
@@ -77,7 +77,7 @@ For contributors developing the plugin:
 {
   "permissions": {
     "allow": [
-      "mcp__plugin_fallback-agent_fallback__Task",
+      "mcp__plugin_nested-subagent_nested__Task",
       "Bash(npm install:*)",
       "Bash(npm test:*)",
       "Bash(npm run:*)",

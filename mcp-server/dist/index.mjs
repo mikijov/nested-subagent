@@ -13777,10 +13777,10 @@ function handleAbort(map, taskId, signal = "SIGTERM") {
 //#endregion
 //#region src/index.ts
 /**
-* Fallback Agent MCP Server - Streaming Edition
+* Nested Subagent MCP Server - Streaming Edition
 *
-* This MCP server provides a fallback agent by spawning fresh Claude processes
-* with REAL-TIME progress streaming using MCP progress notifications.
+* This MCP server enables unlimited nested subagents by spawning fresh Claude
+* processes with REAL-TIME progress streaming using MCP progress notifications.
 *
 * KEY FEATURES:
 * - Uses `claude -p --output-format stream-json --verbose` for real-time streaming
@@ -13802,7 +13802,7 @@ function handleAbort(map, taskId, signal = "SIGTERM") {
 *             └── Returns final result when complete
 * ```
 */
-const LOG_FILE = "/tmp/fallback-agent-debug.log";
+const LOG_FILE = "/tmp/nested-subagent-debug.log";
 function log(message) {
 	const logLine = `[${(/* @__PURE__ */ new Date()).toISOString()}] ${message}\n`;
 	try {
@@ -13810,7 +13810,7 @@ function log(message) {
 	} catch {}
 }
 try {
-	writeFileSync(LOG_FILE, `=== Fallback Agent MCP Server Started ===\n`);
+	writeFileSync(LOG_FILE, `=== Nested Subagent MCP Server Started ===\n`);
 	appendFileSync(LOG_FILE, `CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || "(not set)"}\n`);
 } catch {}
 const NESTED_TASK_TOOL = {
@@ -13965,7 +13965,7 @@ This is intended for out-of-band orchestration: a separate MCP client (or a sibl
 	}
 };
 const server = new Server({
-	name: "fallback-agent",
+	name: "nested-subagent",
 	version: "2.0.0"
 }, { capabilities: { tools: {} } });
 const activeProcesses = /* @__PURE__ */ new Map();
@@ -14300,7 +14300,7 @@ process.on("SIGINT", () => {
 async function main() {
 	const transport = new StdioServerTransport();
 	await server.connect(transport);
-	console.error("Fallback Agent MCP Server v2.0.0 (streaming) running on stdio");
+	console.error("Nested Subagent MCP Server v2.0.0 (streaming) running on stdio");
 }
 main().catch((error) => {
 	console.error("Fatal error:", error);

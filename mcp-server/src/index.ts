@@ -1,8 +1,8 @@
 /**
- * Fallback Agent MCP Server - Streaming Edition
+ * Nested Subagent MCP Server - Streaming Edition
  *
- * This MCP server provides a fallback agent by spawning fresh Claude processes
- * with REAL-TIME progress streaming using MCP progress notifications.
+ * This MCP server enables unlimited nested subagents by spawning fresh Claude
+ * processes with REAL-TIME progress streaming using MCP progress notifications.
  *
  * KEY FEATURES:
  * - Uses `claude -p --output-format stream-json --verbose` for real-time streaming
@@ -46,7 +46,7 @@ import {
 } from "./session.js";
 
 // Debug logging to file - use /tmp for reliable access
-const LOG_FILE = "/tmp/fallback-agent-debug.log";
+const LOG_FILE = "/tmp/nested-subagent-debug.log";
 function log(message: string) {
   const timestamp = new Date().toISOString();
   const logLine = `[${timestamp}] ${message}\n`;
@@ -59,7 +59,7 @@ function log(message: string) {
 
 // Initialize log file
 try {
-  writeFileSync(LOG_FILE, `=== Fallback Agent MCP Server Started ===\n`);
+  writeFileSync(LOG_FILE, `=== Nested Subagent MCP Server Started ===\n`);
   appendFileSync(LOG_FILE, `CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || '(not set)'}\n`);
 } catch {
   // Ignore
@@ -258,7 +258,7 @@ interface ProgressState {
 // Create MCP server
 const server = new Server(
   {
-    name: "fallback-agent",
+    name: "nested-subagent",
     version: "2.0.0",
   },
   {
@@ -737,7 +737,7 @@ process.on("SIGINT", () => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Fallback Agent MCP Server v2.0.0 (streaming) running on stdio");
+  console.error("Nested Subagent MCP Server v2.0.0 (streaming) running on stdio");
 }
 
 main().catch((error) => {

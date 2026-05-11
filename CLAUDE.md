@@ -11,9 +11,9 @@ A Claude Code plugin that enables **unlimited nested subagents**. The native Tas
 The repo, plugin, and MCP server all use slightly different names — keep them straight:
 
 - Repo directory: `nested-subagent`
-- Plugin name (`.claude-plugin/marketplace.json`): `fallback-agent`
-- MCP server name (`.mcp.json`): `fallback`
-- Exposed tool: `mcp__plugin_fallback-agent_fallback__Task`
+- Plugin name (`.claude-plugin/marketplace.json`): `nested-subagent`
+- MCP server name (`.mcp.json`): `nested`
+- Exposed tool: `mcp__plugin_nested-subagent_nested__Task`
 
 ## Commands
 
@@ -93,12 +93,12 @@ Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications
 - Session lifecycle validation lives in `validateSessionParams` (`session.ts`). Rules: `resume`/`continueRecent` are mutually exclusive; `forkSession` requires one of them; `sessionId` + `resume`/`continueRecent` requires `forkSession` (CLI requirement).
 - `activeProcesses` is `Map<string, ActiveTaskEntry>`. Entries are registered with `proc: null` **before** `spawn()` returns so an `AbortTask` call that races the spawn can queue a signal; the spawn path delivers the queued signal once it attaches the real `ChildProcess`.
 - Timeout: `SIGTERM`, then `SIGKILL` 5s later. All active entries are torn down on `SIGTERM`/`SIGINT` to the server itself.
-- Debug log: `/tmp/fallback-agent-debug.log` (overwritten on each server start).
+- Debug log: `/tmp/nested-subagent-debug.log` (overwritten on each server start).
 - Persistent sessions accumulate under `~/.claude/sessions/`. The plugin does not clean them up.
 
 ## Tool parameters
 
-### `mcp__plugin_fallback-agent_fallback__Task`
+### `mcp__plugin_nested-subagent_nested__Task`
 
 Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the shared `TaskInput` type and helpers are in `mcp-server/src/session.ts`.
 
@@ -133,7 +133,7 @@ session_id: <uuid>
 persisted: true|false
 ```
 
-### `mcp__plugin_fallback-agent_fallback__AbortTask`
+### `mcp__plugin_nested-subagent_nested__AbortTask`
 
 | Parameter | Type   | Notes                                                                                          |
 |-----------|--------|------------------------------------------------------------------------------------------------|

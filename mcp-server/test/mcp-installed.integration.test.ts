@@ -1,5 +1,5 @@
 /**
- * Level 0: Verify the fallback-agent MCP server is installed and available
+ * Level 0: Verify the nested-subagent MCP server is installed and available
  */
 import { describe, it, expect } from "vitest";
 import { resolve, dirname } from "node:path";
@@ -10,10 +10,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_DIR = resolve(__dirname, "../..");
 
 describe("Level 0: MCP Server Installation", () => {
-  it("should have the fallback-agent MCP tool available", async () => {
+  it("should have the nested-subagent MCP tool available", async () => {
     const result = await runClaude({
       prompt:
-        "List your available tools. Do you have a tool called mcp__plugin_fallback_agent__Task or similar? Just answer yes or no.",
+        "List your available tools. Do you have a tool called mcp__plugin_nested-subagent_nested__Task or similar? Just answer yes or no.",
       model: "haiku",
       maxTurns: 1,
       timeout: 30000,

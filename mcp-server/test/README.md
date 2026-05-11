@@ -1,6 +1,6 @@
-# Testing the Fallback Agent Plugin
+# Testing the Nested Subagent Plugin
 
-This directory contains tests for the fallback-agent MCP plugin.
+This directory contains tests for the nested-subagent MCP plugin.
 
 ## Test Types
 

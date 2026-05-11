@@ -132,7 +132,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 
 ## Tool Reference
 
-### `mcp__plugin_fallback-agent_fallback__Task`
+### `mcp__plugin_nested-subagent_nested__Task`
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -160,7 +160,7 @@ session_id: <uuid>
 persisted: true|false
 ```
 
-### `mcp__plugin_fallback-agent_fallback__AbortTask`
+### `mcp__plugin_nested-subagent_nested__AbortTask`
 
 | Parameter | Type | Description |
 |-----------|------|-------------|

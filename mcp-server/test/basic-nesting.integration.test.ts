@@ -1,5 +1,5 @@
 /**
- * Integration tests for the fallback-agent plugin
+ * Integration tests for the nested-subagent plugin
  *
  * These tests verify that:
  * 1. Direct CLI execution works (baseline)
@@ -99,7 +99,7 @@ describe("Nested Subagent Plugin Integration Tests", () => {
       // Check that the nested subagent MCP tool was called
       const nestedCalls = result.toolUses.filter(
         (tu) =>
-          tu.name === "mcp__plugin_fallback_agent__Task" ||
+          tu.name === "mcp__plugin_nested-subagent_nested__Task" ||
           tu.name.includes("nested") ||
           tu.name.includes("subagent")
       );

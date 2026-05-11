@@ -285,7 +285,7 @@ Native TaskTool:
                               Cannot spawn further agents
 
 Nested-SubAgent Plugin:
-  Main Agent → mcp__plugin_fallback-agent_fallback__Task → spawn "claude -p" → Fresh Main Agent
+  Main Agent → mcp__plugin_nested-subagent_nested__Task → spawn "claude -p" → Fresh Main Agent
                                                                               ↓
                                                                        CAN use Task tool
                                                                               ↓
