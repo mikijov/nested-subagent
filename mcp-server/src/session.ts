@@ -36,6 +36,7 @@ export interface TaskInput {
   taskId?: string;
   // Response shape
   includeToolOutputs?: boolean;
+  includeThinking?: boolean;
 }
 
 export type ErrorKind =
@@ -251,4 +252,211 @@ export function shutdownChildren(
     }
     process.exit(0);
   }, graceMs);
+}
+
+// ---------------------------------------------------------------------------
+// Stream parsing / response shaping
+// ---------------------------------------------------------------------------
+
+export interface ToolOutput {
+  tool: string;
+  output: string;
+}
+
+export interface ThinkingBlock {
+  text: string;
+}
+
+export interface ProgressState {
+  toolUseCount: number;
+  currentToolUse: string | null;
+  startTime: number;
+  toolOutputs: ToolOutput[];
+  toolUseCounts: Map<string, number>;
+  thinkingBlockCount: number;
+  thinkingBlocks: ThinkingBlock[];
+}
+
+export interface RunTaskResult {
+  success: boolean;
+  result?: string;
+  error?: string;
+  errorKind?: ErrorKind;
+  toolUseCount?: number;
+  duration?: number;
+  tokens?: number;
+  cacheReadTokens?: number;
+  costUsd?: number;
+  toolOutputs?: ToolOutput[];
+  toolUseSummary?: Array<{ tool: string; count: number }>;
+  thinkingBlockCount?: number;
+  thinkingBlocks?: ThinkingBlock[];
+  sessionId?: string;
+  persisted?: boolean;
+  taskId?: string;
+}
+
+export interface TaskStats {
+  toolUseCount?: number;
+  durationMs?: number;
+  tokens?: number;
+  cacheReadTokens?: number;
+  costUsd?: number;
+  thinkingBlocks?: number;
+}
+
+export interface TaskPayload {
+  ok: boolean;
+  taskId: string;
+  sessionId?: string;
+  persisted?: boolean;
+  result?: string;
+  error?: string;
+  errorKind?: ErrorKind;
+  stats?: TaskStats;
+  toolUseSummary?: Array<{ tool: string; count: number }>;
+  toolOutputs?: Array<{ tool: string; output: string }>;
+  thinkingBlocks?: ThinkingBlock[];
+}
+
+export const TOOL_OUTPUT_MAX_BYTES = 16 * 1024;
+
+/**
+ * Truncate a string so its UTF-8 byte length does not exceed `maxBytes`.
+ * Decoding the head buffer with `Buffer.toString("utf8")` replaces any
+ * truncated mid-multibyte-character bytes with U+FFFD, so the marker length
+ * accounts for that.
+ */
+export function truncateUtf8(input: string, maxBytes: number): string {
+  const buf = Buffer.from(input, "utf8");
+  if (buf.length <= maxBytes) return input;
+  const head = buf.subarray(0, maxBytes).toString("utf8");
+  const dropped = buf.length - maxBytes;
+  return `${head}…[truncated ${dropped} bytes]`;
+}
+
+export interface AssistantContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  id?: string;
+  input?: Record<string, unknown>;
+  content?: string;
+  thinking?: string;
+}
+
+/**
+ * Pure parser for a single assistant message's content array. Mutates
+ * `state` (tool counters, thinking counters, tool/thinking accumulators) and
+ * returns the progress messages the caller should emit and any unknown block
+ * types the caller should log. Side-effect free beyond `state`.
+ */
+export function handleAssistantContent(
+  content: AssistantContentBlock[],
+  state: ProgressState,
+): { progressMessages: string[]; unknownBlockTypes: string[] } {
+  const progressMessages: string[] = [];
+  const unknownBlockTypes: string[] = [];
+  for (const block of content) {
+    switch (block.type) {
+      case "tool_use":
+        if (block.name) {
+          state.toolUseCount++;
+          state.currentToolUse = block.name;
+          state.toolUseCounts.set(
+            block.name,
+            (state.toolUseCounts.get(block.name) ?? 0) + 1,
+          );
+          progressMessages.push(
+            `Tool: ${block.name}${block.input ? ` (${JSON.stringify(block.input).slice(0, 50)}...)` : ""}`,
+          );
+        }
+        break;
+      case "text":
+        if (block.text) {
+          progressMessages.push(
+            `Response: ${block.text.slice(0, 100)}${block.text.length > 100 ? "..." : ""}`,
+          );
+        }
+        break;
+      case "thinking": {
+        state.thinkingBlockCount++;
+        const text = block.thinking ?? "";
+        state.thinkingBlocks.push({ text });
+        progressMessages.push(
+          `Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`,
+        );
+        break;
+      }
+      case "redacted_thinking":
+        // Encrypted blob — counted but never surfaced as text, since the
+        // isolated child process can't decrypt it for the parent.
+        state.thinkingBlockCount++;
+        progressMessages.push(
+          `Thinking… (block ${state.thinkingBlockCount}, redacted)`,
+        );
+        break;
+      default:
+        unknownBlockTypes.push(block.type);
+    }
+  }
+  return { progressMessages, unknownBlockTypes };
+}
+
+/**
+ * Project a RunTaskResult into the wire-shape returned by the MCP tool. Pure:
+ * deterministic given inputs.
+ */
+export function buildTaskPayload(
+  result: RunTaskResult,
+  includeToolOutputs: boolean,
+  includeThinking: boolean,
+): TaskPayload {
+  const stats: TaskStats = {};
+  if (result.toolUseCount !== undefined) stats.toolUseCount = result.toolUseCount;
+  if (result.duration !== undefined) stats.durationMs = result.duration;
+  if (result.tokens !== undefined) stats.tokens = result.tokens;
+  if (result.cacheReadTokens !== undefined) {
+    stats.cacheReadTokens = result.cacheReadTokens;
+  }
+  if (result.costUsd !== undefined) stats.costUsd = result.costUsd;
+  if (result.thinkingBlockCount !== undefined && result.thinkingBlockCount > 0) {
+    stats.thinkingBlocks = result.thinkingBlockCount;
+  }
+
+  const payload: TaskPayload = {
+    ok: result.success,
+    taskId: result.taskId ?? "",
+  };
+  if (result.sessionId !== undefined) payload.sessionId = result.sessionId;
+  if (result.persisted !== undefined) payload.persisted = result.persisted;
+  if (Object.keys(stats).length > 0) payload.stats = stats;
+  if (result.toolUseSummary && result.toolUseSummary.length > 0) {
+    payload.toolUseSummary = result.toolUseSummary;
+  }
+
+  if (result.success) {
+    if (result.result !== undefined) payload.result = result.result;
+    if (includeToolOutputs && result.toolOutputs && result.toolOutputs.length > 0) {
+      payload.toolOutputs = result.toolOutputs.map((to) => ({
+        tool: to.tool,
+        output: truncateUtf8(to.output, TOOL_OUTPUT_MAX_BYTES),
+      }));
+    }
+  } else {
+    if (result.error !== undefined) payload.error = result.error;
+    if (result.errorKind !== undefined) payload.errorKind = result.errorKind;
+  }
+
+  if (
+    includeThinking &&
+    result.thinkingBlocks &&
+    result.thinkingBlocks.length > 0
+  ) {
+    payload.thinkingBlocks = result.thinkingBlocks.map((tb) => ({
+      text: truncateUtf8(tb.text, TOOL_OUTPUT_MAX_BYTES),
+    }));
+  }
+
+  return payload;
 }

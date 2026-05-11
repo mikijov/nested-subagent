@@ -119,6 +119,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | **Tool restrictions** | ❌ | ✅ allowed / disallowed | ✅ Implemented |
 | **Budget limits** | ❌ | ✅ maxBudgetUsd | ✅ Implemented |
 | **Extended thinking budget** | ❌ | ✅ effort low/medium/high/xhigh/max | ✅ Implemented |
+| **Extended thinking visibility** | ❌ | ✅ counts always, text opt-in (`includeThinking`) | ✅ Implemented |
 | **Resume support** | ✅ --resume | ✅ resume / continue / sessionId / fork | ✅ Implemented |
 | **Fallback model** | ✅ --fallback-model | ❌ Not exposed | **By design** — see [ARCHITECTURE.md](./ARCHITECTURE.md#no-fallback-model) |
 | **Background execution** | ✅ run_in_background | ❌ | 🔲 Planned |
@@ -154,7 +155,8 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | `forkSession` | boolean | When resuming, create a new session ID (`--fork-session`). Requires `resume` or `continueRecent` |
 | `persistSession` | boolean | Default `false`. When `true` (or implied by any resume param), the session is saved and can be resumed later |
 | `taskId` | string | Optional handle for `AbortTask`. If omitted, auto-generated and reported in the first progress notification |
-| `includeToolOutputs` | boolean | Default `false`. When `true`, the response payload's `toolOutputs` array carries each tool's raw stdout (truncated to 8 KB per entry). Default omits these to keep the calling agent's context small |
+| `includeToolOutputs` | boolean | Default `false`. When `true`, the response payload's `toolOutputs` array carries each tool's raw stdout (truncated to 16 KB per entry). Default omits these to keep the calling agent's context small |
+| `includeThinking` | boolean | Default `false`. When `true`, payload's `thinkingBlocks` array carries the subagent's extended-thinking text (truncated to 16 KB per entry). Redacted thinking is counted in `stats.thinkingBlocks` but never surfaced as text |
 
 The tool returns a JSON object — same payload in `content[0].text` (compact) and `structuredContent` (parsed). The shape is declared via `outputSchema` on the tool.
 
@@ -167,8 +169,9 @@ The tool returns a JSON object — same payload in `content[0].text` (compact) a
   "sessionId": "…uuid…",
   "persisted": false,
   "result": "<subagent's final text>",
-  "stats": { "toolUseCount": 5, "durationMs": 45000, "tokens": 12400, "cacheReadTokens": 3200, "costUsd": 0.018 },
-  "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }]
+  "stats": { "toolUseCount": 5, "durationMs": 45000, "tokens": 12400, "cacheReadTokens": 3200, "costUsd": 0.018, "thinkingBlocks": 2 },
+  "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }],
+  "thinkingBlocks": [{ "text": "<subagent's intermediate reasoning…>" }]
 }
 ```
 

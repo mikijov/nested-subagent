@@ -127,7 +127,8 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 | `forkSession`        | boolean  | `--fork-session` — when resuming, create a new session ID. Requires `resume` or `continueRecent`. |
 | `persistSession`     | boolean  | Default `false` (appends `--no-session-persistence`). Any of `resume`/`continueRecent`/`sessionId`/`forkSession` implies `true`; explicit `false` alongside them is rejected. |
 | `taskId`             | string   | Caller-supplied handle for `AbortTask`. Auto-generated if omitted and emitted in the first progress notification (`taskId=…`). |
-| `includeToolOutputs` | boolean  | Default `false`. When `true`, the response payload includes a `toolOutputs` array with raw stdout from each tool the subagent ran (each entry truncated to 8 KB). Default omits these to keep the parent's context small. |
+| `includeToolOutputs` | boolean  | Default `false`. When `true`, the response payload includes a `toolOutputs` array with raw stdout from each tool the subagent ran (each entry truncated to 16 KB). Default omits these to keep the parent's context small. |
+| `includeThinking`    | boolean  | Default `false`. When `true`, the response payload includes a `thinkingBlocks` array with the subagent's extended-thinking text (each entry truncated to 16 KB). Redacted thinking blocks are counted in `stats.thinkingBlocks` but never surfaced as text. |
 
 The response is a JSON object returned both as `content[0].text` (compact `JSON.stringify`) and mirrored into `structuredContent`. Schema is declared on the tool via `outputSchema`. Shape:
 
@@ -144,9 +145,11 @@ The response is a JSON object returned both as `content[0].text` (compact `JSON.
     "durationMs": 45000,
     "tokens": 12400,
     "cacheReadTokens": 3200,
-    "costUsd": 0.018
+    "costUsd": 0.018,
+    "thinkingBlocks": 2
   },
-  "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }]
+  "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }],
+  "thinkingBlocks": [{ "text": "<subagent's intermediate reasoning…>" }]
 }
 
 // failure
@@ -160,7 +163,7 @@ The response is a JSON object returned both as `content[0].text` (compact `JSON.
 }
 ```
 
-`tokens` = standard-rate billable (`input + output + cache_creation`). `cacheReadTokens` is tracked separately because cache reads are billed at a reduced rate. `toolUseSummary` is always included on success; raw `toolOutputs` only when the caller passes `includeToolOutputs: true`.
+`tokens` = standard-rate billable (`input + output + cache_creation`). `cacheReadTokens` is tracked separately because cache reads are billed at a reduced rate. `toolUseSummary` is always included on success; raw `toolOutputs` only when the caller passes `includeToolOutputs: true`. `stats.thinkingBlocks` (count of `thinking` + `redacted_thinking` content blocks) appears whenever the count > 0; raw `thinkingBlocks` only when `includeThinking: true`, and redacted entries are never surfaced as text. The same 16 KB UTF-8 truncator (`truncateUtf8` in `session.ts`) applies to both `toolOutputs` and `thinkingBlocks`.
 
 ### `mcp__plugin_nested-subagent_nested__AbortTask`
 

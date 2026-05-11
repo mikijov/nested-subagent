@@ -13801,6 +13801,90 @@ function shutdownChildren(map, signal, graceMs = 5e3) {
 		process.exit(0);
 	}, graceMs);
 }
+const TOOL_OUTPUT_MAX_BYTES = 16 * 1024;
+/**
+* Truncate a string so its UTF-8 byte length does not exceed `maxBytes`.
+* Decoding the head buffer with `Buffer.toString("utf8")` replaces any
+* truncated mid-multibyte-character bytes with U+FFFD, so the marker length
+* accounts for that.
+*/
+function truncateUtf8(input, maxBytes) {
+	const buf = Buffer.from(input, "utf8");
+	if (buf.length <= maxBytes) return input;
+	return `${buf.subarray(0, maxBytes).toString("utf8")}…[truncated ${buf.length - maxBytes} bytes]`;
+}
+/**
+* Pure parser for a single assistant message's content array. Mutates
+* `state` (tool counters, thinking counters, tool/thinking accumulators) and
+* returns the progress messages the caller should emit and any unknown block
+* types the caller should log. Side-effect free beyond `state`.
+*/
+function handleAssistantContent(content, state) {
+	const progressMessages = [];
+	const unknownBlockTypes = [];
+	for (const block of content) switch (block.type) {
+		case "tool_use":
+			if (block.name) {
+				state.toolUseCount++;
+				state.currentToolUse = block.name;
+				state.toolUseCounts.set(block.name, (state.toolUseCounts.get(block.name) ?? 0) + 1);
+				progressMessages.push(`Tool: ${block.name}${block.input ? ` (${JSON.stringify(block.input).slice(0, 50)}...)` : ""}`);
+			}
+			break;
+		case "text":
+			if (block.text) progressMessages.push(`Response: ${block.text.slice(0, 100)}${block.text.length > 100 ? "..." : ""}`);
+			break;
+		case "thinking": {
+			state.thinkingBlockCount++;
+			const text = block.thinking ?? "";
+			state.thinkingBlocks.push({ text });
+			progressMessages.push(`Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`);
+			break;
+		}
+		case "redacted_thinking":
+			state.thinkingBlockCount++;
+			progressMessages.push(`Thinking… (block ${state.thinkingBlockCount}, redacted)`);
+			break;
+		default: unknownBlockTypes.push(block.type);
+	}
+	return {
+		progressMessages,
+		unknownBlockTypes
+	};
+}
+/**
+* Project a RunTaskResult into the wire-shape returned by the MCP tool. Pure:
+* deterministic given inputs.
+*/
+function buildTaskPayload(result, includeToolOutputs, includeThinking) {
+	const stats = {};
+	if (result.toolUseCount !== void 0) stats.toolUseCount = result.toolUseCount;
+	if (result.duration !== void 0) stats.durationMs = result.duration;
+	if (result.tokens !== void 0) stats.tokens = result.tokens;
+	if (result.cacheReadTokens !== void 0) stats.cacheReadTokens = result.cacheReadTokens;
+	if (result.costUsd !== void 0) stats.costUsd = result.costUsd;
+	if (result.thinkingBlockCount !== void 0 && result.thinkingBlockCount > 0) stats.thinkingBlocks = result.thinkingBlockCount;
+	const payload = {
+		ok: result.success,
+		taskId: result.taskId ?? ""
+	};
+	if (result.sessionId !== void 0) payload.sessionId = result.sessionId;
+	if (result.persisted !== void 0) payload.persisted = result.persisted;
+	if (Object.keys(stats).length > 0) payload.stats = stats;
+	if (result.toolUseSummary && result.toolUseSummary.length > 0) payload.toolUseSummary = result.toolUseSummary;
+	if (result.success) {
+		if (result.result !== void 0) payload.result = result.result;
+		if (includeToolOutputs && result.toolOutputs && result.toolOutputs.length > 0) payload.toolOutputs = result.toolOutputs.map((to) => ({
+			tool: to.tool,
+			output: truncateUtf8(to.output, TOOL_OUTPUT_MAX_BYTES)
+		}));
+	} else {
+		if (result.error !== void 0) payload.error = result.error;
+		if (result.errorKind !== void 0) payload.errorKind = result.errorKind;
+	}
+	if (includeThinking && result.thinkingBlocks && result.thinkingBlocks.length > 0) payload.thinkingBlocks = result.thinkingBlocks.map((tb) => ({ text: truncateUtf8(tb.text, TOOL_OUTPUT_MAX_BYTES) }));
+	return payload;
+}
 
 //#endregion
 //#region src/index.ts
@@ -13975,7 +14059,12 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 			includeToolOutputs: {
 				type: "boolean",
 				default: false,
-				description: "If true, append raw stdout from each tool the subagent used to the response under `toolOutputs`. Default false — the parent receives only `toolUseSummary` counts, so the subagent absorbs bulk tokens. Each output is truncated to 8 KB."
+				description: "If true, append raw stdout from each tool the subagent used to the response under `toolOutputs`. Default false — the parent receives only `toolUseSummary` counts, so the subagent absorbs bulk tokens. Each output is truncated to 16 KB."
+			},
+			includeThinking: {
+				type: "boolean",
+				default: false,
+				description: "If true, append the subagent's extended-thinking content to the response under `thinkingBlocks` (each entry truncated to 16 KB). Default false — the parent receives only `stats.thinkingBlocks` count, since intermediate reasoning is what subagent isolation absorbs. Redacted thinking blocks are counted but never surfaced as text."
 			}
 		},
 		required: ["prompt"]
@@ -14031,7 +14120,11 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 						type: "integer",
 						description: "Tokens read from cache, billed separately at a reduced rate."
 					},
-					costUsd: { type: "number" }
+					costUsd: { type: "number" },
+					thinkingBlocks: {
+						type: "integer",
+						description: "Count of thinking + redacted_thinking content blocks emitted by the subagent. Present only when > 0."
+					}
 				}
 			},
 			toolUseSummary: {
@@ -14048,7 +14141,7 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 			},
 			toolOutputs: {
 				type: "array",
-				description: "Raw stdout per tool invocation. Present only when the caller passed `includeToolOutputs: true`. Each output truncated to 8 KB.",
+				description: "Raw stdout per tool invocation. Present only when the caller passed `includeToolOutputs: true`. Each output truncated to 16 KB.",
 				items: {
 					type: "object",
 					properties: {
@@ -14056,6 +14149,15 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 						output: { type: "string" }
 					},
 					required: ["tool", "output"]
+				}
+			},
+			thinkingBlocks: {
+				type: "array",
+				description: "Subagent's extended-thinking content. Present only when the caller passed `includeThinking: true`. Redacted thinking blocks are counted in `stats.thinkingBlocks` but excluded here. Each entry truncated to 16 KB.",
+				items: {
+					type: "object",
+					properties: { text: { type: "string" } },
+					required: ["text"]
 				}
 			}
 		},
@@ -14096,12 +14198,6 @@ This is intended for out-of-band orchestration: a separate MCP client (or a sibl
 		required: ["taskId"]
 	}
 };
-const TOOL_OUTPUT_MAX_BYTES = 8 * 1024;
-function truncateToolOutput(output) {
-	const buf = Buffer.from(output, "utf8");
-	if (buf.length <= TOOL_OUTPUT_MAX_BYTES) return output;
-	return `${buf.subarray(0, TOOL_OUTPUT_MAX_BYTES).toString("utf8")}…[truncated ${buf.length - TOOL_OUTPUT_MAX_BYTES} bytes]`;
-}
 const server = new Server({
 	name: "nested-subagent",
 	version: "3.0.0"
@@ -14136,7 +14232,9 @@ async function runTask(input, progressToken) {
 		currentToolUse: null,
 		startTime: Date.now(),
 		toolOutputs: [],
-		toolUseCounts: /* @__PURE__ */ new Map()
+		toolUseCounts: /* @__PURE__ */ new Map(),
+		thinkingBlockCount: 0,
+		thinkingBlocks: []
 	};
 	activeProcesses.set(taskId, {
 		proc: null,
@@ -14204,28 +14302,16 @@ async function runTask(input, progressToken) {
 						break;
 					case "assistant":
 						if (msg.message?.content) {
-							for (const block of msg.message.content) if (block.type === "tool_use" && block.name) {
-								state.toolUseCount++;
-								state.currentToolUse = block.name;
-								state.toolUseCounts.set(block.name, (state.toolUseCounts.get(block.name) ?? 0) + 1);
-								if (progressToken !== void 0) server.notification({
-									method: "notifications/progress",
-									params: {
-										progressToken,
-										progress: state.toolUseCount,
-										message: `Tool: ${block.name}${block.input ? ` (${JSON.stringify(block.input).slice(0, 50)}...)` : ""}`
-									}
-								});
-							} else if (block.type === "text" && block.text) {
-								if (progressToken !== void 0) server.notification({
-									method: "notifications/progress",
-									params: {
-										progressToken,
-										progress: state.toolUseCount,
-										message: `Response: ${block.text.slice(0, 100)}${block.text.length > 100 ? "..." : ""}`
-									}
-								});
-							}
+							const { progressMessages, unknownBlockTypes } = handleAssistantContent(msg.message.content, state);
+							if (progressToken !== void 0) for (const message of progressMessages) server.notification({
+								method: "notifications/progress",
+								params: {
+									progressToken,
+									progress: state.toolUseCount,
+									message
+								}
+							});
+							for (const t of unknownBlockTypes) log(`[${taskId}] Unknown assistant content block type: ${t}`);
 						}
 						break;
 					case "user":
@@ -14290,7 +14376,9 @@ async function runTask(input, progressToken) {
 					persisted,
 					toolUseCount: state.toolUseCount,
 					duration: duration$2,
-					toolUseSummary
+					toolUseSummary,
+					thinkingBlockCount: state.thinkingBlockCount,
+					thinkingBlocks: state.thinkingBlocks
 				});
 				return;
 			}
@@ -14317,6 +14405,8 @@ async function runTask(input, progressToken) {
 					costUsd: lastResult.total_cost_usd,
 					toolOutputs: state.toolOutputs,
 					toolUseSummary,
+					thinkingBlockCount: state.thinkingBlockCount,
+					thinkingBlocks: state.thinkingBlocks,
 					sessionId: capturedSessionId,
 					persisted,
 					taskId
@@ -14329,6 +14419,8 @@ async function runTask(input, progressToken) {
 				tokens: 0,
 				toolOutputs: state.toolOutputs,
 				toolUseSummary,
+				thinkingBlockCount: state.thinkingBlockCount,
+				thinkingBlocks: state.thinkingBlocks,
 				sessionId: capturedSessionId,
 				persisted,
 				taskId
@@ -14344,6 +14436,8 @@ async function runTask(input, progressToken) {
 					toolUseCount: state.toolUseCount,
 					duration: duration$2,
 					toolUseSummary,
+					thinkingBlockCount: state.thinkingBlockCount,
+					thinkingBlocks: state.thinkingBlocks,
 					taskId
 				});
 			}
@@ -14404,7 +14498,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 	};
 	const result = await runTask(input, progressToken);
 	log(`Result: success=${result.success}, error=${result.error}`);
-	const payload = buildTaskPayload(result, Boolean(input.includeToolOutputs));
+	const payload = buildTaskPayload(result, Boolean(input.includeToolOutputs), Boolean(input.includeThinking));
 	return {
 		content: [{
 			type: "text",
@@ -14414,33 +14508,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 		...payload.ok ? {} : { isError: true }
 	};
 });
-function buildTaskPayload(result, includeToolOutputs) {
-	const stats = {};
-	if (result.toolUseCount !== void 0) stats.toolUseCount = result.toolUseCount;
-	if (result.duration !== void 0) stats.durationMs = result.duration;
-	if (result.tokens !== void 0) stats.tokens = result.tokens;
-	if (result.cacheReadTokens !== void 0) stats.cacheReadTokens = result.cacheReadTokens;
-	if (result.costUsd !== void 0) stats.costUsd = result.costUsd;
-	const payload = {
-		ok: result.success,
-		taskId: result.taskId ?? ""
-	};
-	if (result.sessionId !== void 0) payload.sessionId = result.sessionId;
-	if (result.persisted !== void 0) payload.persisted = result.persisted;
-	if (Object.keys(stats).length > 0) payload.stats = stats;
-	if (result.toolUseSummary && result.toolUseSummary.length > 0) payload.toolUseSummary = result.toolUseSummary;
-	if (result.success) {
-		if (result.result !== void 0) payload.result = result.result;
-		if (includeToolOutputs && result.toolOutputs && result.toolOutputs.length > 0) payload.toolOutputs = result.toolOutputs.map((to) => ({
-			tool: to.tool,
-			output: truncateToolOutput(to.output)
-		}));
-	} else {
-		if (result.error !== void 0) payload.error = result.error;
-		if (result.errorKind !== void 0) payload.errorKind = result.errorKind;
-	}
-	return payload;
-}
 process.on("SIGTERM", () => shutdownChildren(activeProcesses, "SIGTERM"));
 process.on("SIGINT", () => shutdownChildren(activeProcesses, "SIGINT"));
 async function main() {
