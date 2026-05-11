@@ -9,7 +9,7 @@
       "name": "fallback-agent",
       "source": "./",
       "description": "Fallback agent that spawns fresh Claude processes with full tool access. Bypasses the native Task tool's recursion limit, enabling unlimited nesting.",
-      "version": "1.0.3",
+      "version": "2.0.0",
       "mcpServers": {
         "fallback": {
           "command": "node",

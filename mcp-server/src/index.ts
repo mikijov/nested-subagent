@@ -138,7 +138,7 @@ Usage notes:
       },
       permissionMode: {
         type: "string",
-        enum: ["default", "acceptEdits", "bypassPermissions", "plan"],
+        enum: ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"],
         description: "Permission mode for the spawned subagent",
       },
       systemPrompt: {
@@ -180,7 +180,7 @@ interface TaskInput {
   workingDir?: string;
   timeout?: number;
   allowWrite?: boolean;
-  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
+  permissionMode?: "acceptEdits" | "auto" | "bypassPermissions" | "default" | "dontAsk" | "plan";
   systemPrompt?: string;
   appendSystemPrompt?: string;
   allowedTools?: string[];
@@ -240,8 +240,9 @@ function formatDuration(ms: number): string {
 async function runTask(
   input: TaskInput,
   progressToken?: string | number,
-): Promise<{ success: boolean; result?: string; error?: string; usage?: object; toolUseCount?: number; duration?: number; tokens?: number; toolOutputs?: ToolOutput[] }> {
+): Promise<{ success: boolean; result?: string; error?: string; usage?: object; toolUseCount?: number; duration?: number; tokens?: number; cacheReadTokens?: number; toolOutputs?: ToolOutput[] }> {
   const {
+    description,
     prompt,
     model = "sonnet",
     workingDir = process.cwd(),
@@ -338,6 +339,19 @@ async function runTask(
 
     // Track for abort
     activeProcesses.set(processId, proc);
+
+    // Surface the caller-supplied description as the first progress message,
+    // so the streaming UI shows a task label before the spawned session boots.
+    if (progressToken !== undefined && description) {
+      server.notification({
+        method: "notifications/progress",
+        params: {
+          progressToken,
+          progress: 0,
+          message: `Task: ${description}`,
+        },
+      });
+    }
 
     // Timeout handling
     const timeoutId = setTimeout(() => {
@@ -446,16 +460,26 @@ async function runTask(
       }
     });
 
-    // Collect stderr for errors
+    // Collect stderr for errors. Drain it explicitly before resolving so a
+    // buffered chunk emitted in the same tick as `close` isn't lost.
     let stderr = "";
-    proc.stderr?.on("data", (data: Buffer) => {
-      const chunk = data.toString();
-      stderr += chunk;
-      log(`[${processId}] STDERR: ${chunk}`);
+    const stderrDrained = new Promise<void>((resolveDrain) => {
+      if (!proc.stderr) {
+        resolveDrain();
+        return;
+      }
+      proc.stderr.on("data", (data: Buffer) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        log(`[${processId}] STDERR: ${chunk}`);
+      });
+      proc.stderr.once("end", () => resolveDrain());
+      proc.stderr.once("error", () => resolveDrain());
     });
 
     // Handle process completion
-    proc.on("close", (code: number | null) => {
+    proc.on("close", async (code: number | null) => {
+      await stderrDrained;
       log(`[${processId}] Process closed with code: ${code}`);
       clearTimeout(timeoutId);
       activeProcesses.delete(processId);
@@ -472,13 +496,14 @@ async function runTask(
       }
 
       if (lastResult) {
-        // Calculate total tokens
+        // Tokens billed at the standard rate. Cache reads are billed at a
+        // reduced rate and tracked separately so callers can see the split.
         const totalTokens = lastResult.usage
           ? (lastResult.usage.cache_creation_input_tokens ?? 0) +
-          (lastResult.usage.cache_read_input_tokens ?? 0) +
           lastResult.usage.input_tokens +
           lastResult.usage.output_tokens
           : 0;
+        const cacheReadTokens = lastResult.usage?.cache_read_input_tokens ?? 0;
 
         // Emit final progress
         if (progressToken !== undefined) {
@@ -500,6 +525,7 @@ async function runTask(
           toolUseCount: state.toolUseCount,
           duration,
           tokens: totalTokens,
+          cacheReadTokens,
           toolOutputs: state.toolOutputs,
         });
       } else if (code === 0) {
@@ -566,8 +592,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Format output to match native Task tool: "Done (X tool uses · Yk tokens · Zs)"
     const toolUseText = result.toolUseCount === 1 ? '1 tool use' : `${result.toolUseCount ?? 0} tool uses`;
     const tokensText = formatNumber(result.tokens ?? 0) + ' tokens';
+    const cacheText = (result.cacheReadTokens ?? 0) > 0
+      ? ` · ${formatNumber(result.cacheReadTokens ?? 0)} cached`
+      : '';
     const durationText = formatDuration(result.duration ?? 0);
-    const summary = `Done (${toolUseText} · ${tokensText} · ${durationText})`;
+    const summary = `Done (${toolUseText} · ${tokensText}${cacheText} · ${durationText})`;
 
     // Format tool outputs for display (similar to native Task tool)
     let toolOutputsText = '';
@@ -628,7 +657,7 @@ process.on("SIGINT", () => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Fallback Agent MCP Server v2.0 (streaming) running on stdio");
+  console.error("Fallback Agent MCP Server v2.0.0 (streaming) running on stdio");
 }
 
 main().catch((error) => {

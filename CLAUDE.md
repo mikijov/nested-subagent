@@ -4,85 +4,110 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Claude Code plugin that enables **unlimited nested subagents**. The native Task tool blocks subagents from spawning other subagents (via tool filtering in `AgentTool`). This plugin bypasses that limitation by spawning fresh `claude -p` processes, which are full main agents with complete tool access.
+A Claude Code plugin that enables **unlimited nested subagents**. The native Task tool's `AgentTool` filters itself out of subagent tool lists (`src/tools/AgentTool/prompt.ts` in the Claude Code source), so subagents cannot spawn further subagents. This plugin sidesteps that by exposing an MCP `Task` tool that spawns a fresh `claude -p` subprocess — a brand-new main agent with full tool access, including the native Task tool.
+
+### Naming
+
+The repo, plugin, and MCP server all use slightly different names — keep them straight:
+
+- Repo directory: `nested-subagent`
+- Plugin name (`.claude-plugin/marketplace.json`): `fallback-agent`
+- MCP server name (`.mcp.json`): `fallback`
+- Exposed tool: `mcp__plugin_fallback-agent_fallback__Task`
 
 ## Commands
 
-### Build & Development
+All commands run from `mcp-server/`. The scripts are written for `bun` (preferred — matches CI/repo conventions); if `bun` isn't installed, the same scripts work under `npm run …` because every script just shells out to a `devDependency` (`tsdown`, `tsc`, `tsx`, `vitest`).
+
+### Required tooling
+
+- `claude` CLI on `PATH` — the MCP server spawns `claude -p` for each nested task. Without it the tool returns `Failed to spawn`.
+- Node.js `>= 18` — runtime for the bundled `dist/index.mjs`.
+- `bun` **or** `npm` — package manager + script runner. `bun install` / `npm install` populate `node_modules` with `tsdown`, `tsc`, `tsx`, `vitest`.
+
+### Build & dev
 
 ```bash
-cd mcp-server && bun run build      # Build MCP server (uses tsdown)
-cd mcp-server && bun run dev        # Run MCP server in development mode (tsx)
-cd mcp-server && bun run typecheck  # TypeScript type checking
+bun run build      # Bundle via tsdown → dist/index.mjs (single ESM file, all deps inlined)
+bun run dev        # Run server directly with tsx
+bun run typecheck  # tsc --noEmit
 ```
 
-### Testing
+### Tests
 
 ```bash
-cd mcp-server && bun run test           # Run unit tests
-cd mcp-server && bun run test:watch # Watch mode
-cd mcp-server && bun run test:integration  # Integration tests (*.integration.test.ts files)
+bun run test                            # Unit tests (free, no Claude spawns)
+bun run test:watch                      # Unit watch mode
+bun run test:integration                # Integration tests — spawns real `claude` processes; costs $$
+bun run test -- test/helpers.test.ts    # Single file
+bun run test -- --grep "extractText"    # Pattern match
 ```
 
-### Plugin Installation
+**Never run `bun test`.** That invokes bun's native test runner with a 5-second timeout and ignores the vitest config — use `bun run test` (which delegates to vitest).
+
+Integration tests pin to `model: "haiku"` with low `maxTurns` to bound cost; they run serially in a single fork (see `vitest.integration.config.ts`).
+
+### Plugin install (for manual testing)
 
 ```bash
-claude --plugin-dir ./       # Per-session usage
+claude --plugin-dir /path/to/nested-subagent   # Per-session
+claude /plugin install ./nested-subagent       # Local install
+# Or add marketplace `gruckion/nested-subagent` via the /plugin UI
 ```
+
+The marketplace entry points at `mcp-server/dist/index.mjs`, so `bun run build` is required before installs pick up code changes.
 
 ## Architecture
 
-### Key Insight
+### The bypass
 
-The native Task tool's recursion blocker (`.filter(_ => _.name !== AgentTool.name)`) is **process-local**. By spawning a fresh `claude -p` process via MCP, we create a new main agent that has full tool access including the Task tool.
-
-```markdown
-Native:  Main → Subagent → BLOCKED (Task tool filtered out)
-Plugin:  Main → MCP Tool → spawn "claude -p" → Fresh Main Agent → CAN use Task → Unlimited nesting
+```
+Native:  Main → Task → Subagent (Task filtered out) → BLOCKED
+Plugin:  Main → mcp Task → spawn `claude -p` → Fresh Main Agent → CAN Task → unlimited depth
 ```
 
-### Directory Structure
+The recursion blocker in native Claude Code (`.filter(_ => _.name !== AgentTool.name)`) is process-local. A fresh `claude -p` process is a new main agent that the blocker never touches.
 
-```markdown
-fallback-agent/
-├── .claude-plugin/
-│   └── marketplace.json     # Plugin manifest for marketplace distribution
-├── .mcp.json               # MCP server configuration
-├── mcp-server/
-│   ├── src/index.ts        # MCP server implementation (core logic)
-│   ├── dist/               # Built output (bundled with tsdown)
-│   └── test/               # Unit and integration tests
-└── src/                    # Reference Claude Code source (for understanding internals)
+### MCP server (`mcp-server/src/index.ts`)
+
+Single tool, named `Task` to mirror the native UX. The handler (`runTask`, ~line 240) builds CLI args and spawns:
+
+```
+claude -p <prompt> --output-format stream-json --verbose --model <model> \
+  [--dangerously-skip-permissions | --permission-mode <mode>] \
+  [--system-prompt …] [--append-system-prompt …] \
+  [--allowed-tools …] [--disallowed-tools …] \
+  [--max-budget-usd …] [--add-dir …] \
+  --no-session-persistence \
+  [--plugin-dir $CLAUDE_PLUGIN_ROOT]   # only when env var is set
 ```
 
-### MCP Server (`mcp-server/src/index.ts`)
+Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications/progress` for each `system`/`assistant`/`user`/`result` event, capturing tool-use counts, token usage, and cost from the final `result` message.
 
-The MCP server exposes a single tool named `Task` that:
+**Things to know when editing this file:**
 
-1. Spawns `claude -p --output-format stream-json --verbose` subprocess
-2. Parses streaming JSON output line-by-line for real-time progress
-3. Emits MCP `notifications/progress` for each tool use
-4. Passes `--plugin-dir` to spawned process to enable recursive nesting
-5. Handles abort via SIGTERM/SIGKILL
+- `proc.stdin?.end()` runs immediately after spawn — `claude -p` takes the prompt as a CLI arg, not via stdin, and the process hangs if stdin stays open.
+- The `--plugin-dir` propagation depends on `CLAUDE_PLUGIN_ROOT` being set in the env. Without it, the spawned process won't have this plugin's MCP server, and nesting beyond one level silently stops working.
+- `--no-session-persistence` is always passed so spawned tasks don't pollute session history.
+- Timeout: `SIGTERM`, then `SIGKILL` 5s later. All active PIDs are tracked in `activeProcesses` and torn down on `SIGTERM`/`SIGINT` to the server itself.
+- Debug log: `/tmp/fallback-agent-debug.log` (overwritten on each server start).
 
-**Critical implementation detail:** `proc.stdin?.end()` must be called immediately after spawn - the prompt is passed via CLI argument, not stdin.
+## Tool parameters
 
-### Debug Logging
+`mcp__plugin_fallback-agent_fallback__Task` — schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`).
 
-All MCP server operations log to `/tmp/fallback-agent-debug.log` for troubleshooting.
-
-## Tool Parameters
-
-The `mcp__plugin_fallback_agent__Task` tool accepts:
-
-| Parameter                          | Type        | Description                                                                                       |
-|------------------------------------|-------------|---------------------------------------------------------------------------------------------------|
-| `prompt`                           | string      | **Required.** Task for the agent                                                                  |
-| `model`                            | string      | Model to use: `sonnet`, `opus`, or `haiku`. *(Default: `sonnet`)*                                 |
-| `timeout`                          | number      | Timeout in milliseconds. *(Default: `600000`)*                                                    |
-| `allowWrite`                       | boolean     | Enable `--dangerously-skip-permissions` to allow file writes/tools that modify the filesystem     |
-| `permissionMode`                   | string      | Permission mode: one of `default`, `acceptEdits`, `bypassPermissions`, or `plan`                  |
-| `systemPrompt`                     | string      | Custom system prompt                                                                              |
-| `allowedTools`                     | string[]    | List of tools explicitly allowed for this agent (overrides default tool access)                   |
-| `disallowedTools`                  | string[]    | List of tools to disallow for this agent (overrides default tool access)                          |
-| `maxBudgetUsd`                     | number      | Optional cost limit (in USD) for this task                                                        |
+| Parameter            | Type     | Notes                                                                |
+|----------------------|----------|----------------------------------------------------------------------|
+| `prompt`             | string   | Required.                                                            |
+| `description`        | string   | 3–5 word UI summary.                                                 |
+| `model`              | enum     | `sonnet` (default) \| `opus` \| `haiku`.                             |
+| `workingDir`         | string   | Defaults to `process.cwd()`.                                         |
+| `timeout`            | number   | Milliseconds. Default `600000` (10 min).                             |
+| `allowWrite`         | boolean  | Adds `--dangerously-skip-permissions` (mutually exclusive w/ below). |
+| `permissionMode`     | enum     | `acceptEdits` \| `auto` \| `bypassPermissions` \| `default` \| `dontAsk` \| `plan`. |
+| `systemPrompt`       | string   | `--system-prompt`.                                                   |
+| `appendSystemPrompt` | string   | `--append-system-prompt`.                                            |
+| `allowedTools`       | string[] | `--allowed-tools`.                                                   |
+| `disallowedTools`    | string[] | `--disallowed-tools`.                                                |
+| `maxBudgetUsd`       | number   | `--max-budget-usd`.                                                  |
+| `addDirs`            | string[] | `--add-dir`.                                                         |
