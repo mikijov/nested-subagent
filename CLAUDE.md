@@ -129,7 +129,7 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 | `persistSession`     | boolean  | Default `false` (appends `--no-session-persistence`). Any of `resume`/`continueRecent`/`sessionId`/`forkSession` implies `true`; explicit `false` alongside them is rejected. |
 | `taskId`             | string   | Caller-supplied handle for `AbortTask`. Auto-generated if omitted and emitted in the first progress notification (`taskId=…`). |
 | `includeToolOutputs` | boolean  | Default `false`. When `true`, the response payload includes a `toolOutputs` array with raw stdout from each tool the subagent ran (each entry truncated to 16 KB). Default omits these to keep the parent's context small. |
-| `includeThinking`    | boolean  | Default `false`. When `true`, the response payload includes a `thinkingBlocks` array with the subagent's extended-thinking text (each entry truncated to 16 KB). Redacted thinking blocks are counted in `stats.thinkingBlocks` but never surfaced as text. |
+| `includeThinking`    | boolean  | Default `false`. When `true`, the response payload includes a `thinkingBlocks` array with the subagent's extended-thinking text (each entry truncated to 16 KB). Two shapes are counted in `stats.thinkingBlocks` but excluded from the array: **redacted** thinking (encrypted blob the parent can't decrypt) and **empty-text** thinking (signed `{thinking: ""}` blocks Opus 4.x emits when extended thinking is enabled but the model has no reasoning text for that turn — the signature satisfies API continuity; the empty string is noise). |
 
 The response is a JSON object returned both as `content[0].text` (compact `JSON.stringify`) and mirrored into `structuredContent`. Schema is declared on the tool via `outputSchema`. Shape:
 
@@ -164,7 +164,7 @@ The response is a JSON object returned both as `content[0].text` (compact `JSON.
 }
 ```
 
-`tokens` = standard-rate billable (`input + output + cache_creation`). `cacheReadTokens` is tracked separately because cache reads are billed at a reduced rate. `toolUseSummary` is always included on success; raw `toolOutputs` only when the caller passes `includeToolOutputs: true`. `stats.thinkingBlocks` (count of `thinking` + `redacted_thinking` content blocks) appears whenever the count > 0; raw `thinkingBlocks` only when `includeThinking: true`, and redacted entries are never surfaced as text. The same 16 KB UTF-8 truncator (`truncateUtf8` in `session.ts`) applies to both `toolOutputs` and `thinkingBlocks`.
+`tokens` = standard-rate billable (`input + output + cache_creation`). `cacheReadTokens` is tracked separately because cache reads are billed at a reduced rate. `toolUseSummary` is always included on success; raw `toolOutputs` only when the caller passes `includeToolOutputs: true`. `stats.thinkingBlocks` (count of every thinking-shaped block — `thinking` with or without text, plus `redacted_thinking`) appears whenever the count > 0; raw `thinkingBlocks` only when `includeThinking: true`. The array excludes both redacted entries (encrypted) and empty-text entries (the signed `{thinking: ""}` placeholder Opus 4.x sometimes emits), so `stats.thinkingBlocks >= thinkingBlocks.length`. The same 16 KB UTF-8 truncator (`truncateUtf8` in `session.ts`) applies to both `toolOutputs` and `thinkingBlocks`.
 
 ### `mcp__plugin_nested-subagent_nested__AbortTask`
 

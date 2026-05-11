@@ -207,7 +207,7 @@ The MCP server (`mcp-server/src/index.ts`) works by:
 
   // Response shape
   includeToolOutputs?: boolean,  // default false; include raw tool stdouts (each truncated to 16 KB)
-  includeThinking?: boolean,     // default false; include extended-thinking text (each truncated to 16 KB; redacted blocks counted but never surfaced)
+  includeThinking?: boolean,     // default false; include extended-thinking text (each truncated to 16 KB). Redacted blocks AND empty-text blocks (the signed `{thinking: ""}` placeholder Opus 4.x sometimes emits) are counted but excluded from the surfaced array, so `stats.thinkingBlocks >= thinkingBlocks.length`.
 }
 
 // AbortTask tool — sibling for out-of-band cancellation

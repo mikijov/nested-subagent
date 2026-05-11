@@ -61,6 +61,28 @@ describe("handleAssistantContent — thinking blocks", () => {
     expect(unknownBlockTypes).toEqual([]);
   });
 
+  it("counts empty-text thinking blocks but excludes them from the surfaced array", () => {
+    // Opus 4.x can emit { type: "thinking", thinking: "", signature: "…" }
+    // when extended thinking is enabled but the model has no reasoning text
+    // for the turn. Count it; don't surface a {text: ""} entry.
+    const state = makeState();
+    const { progressMessages, unknownBlockTypes } = handleAssistantContent(
+      [
+        { type: "thinking", thinking: "" },
+        { type: "thinking" }, // missing field — same shape after `?? ""`
+        { type: "thinking", thinking: "real content" },
+      ],
+      state,
+    );
+    expect(state.thinkingBlockCount).toBe(3);
+    expect(state.thinkingBlocks).toEqual([{ text: "real content" }]);
+    expect(progressMessages).toHaveLength(3);
+    expect(progressMessages[0]).toMatch(/Thinking… \(block 1, empty\)/);
+    expect(progressMessages[1]).toMatch(/Thinking… \(block 2, empty\)/);
+    expect(progressMessages[2]).toMatch(/Thinking… \(block 3, ~12 chars\)/);
+    expect(unknownBlockTypes).toEqual([]);
+  });
+
   it("captures unknown block types without crashing or counting", () => {
     const state = makeState();
     const { progressMessages, unknownBlockTypes } = handleAssistantContent(

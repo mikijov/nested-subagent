@@ -407,10 +407,21 @@ export function handleAssistantContent(
           block.thinking ?? "",
           TOOL_OUTPUT_MAX_BYTES,
         );
-        state.thinkingBlocks.push({ text });
-        progressMessages.push(
-          `Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`,
-        );
+        // Opus 4.x sometimes emits a signed-but-empty thinking block when
+        // extended thinking is enabled but the model has no reasoning text
+        // to surface for that turn. The signature satisfies API continuity;
+        // the empty string is noise. Count it (so stats stay honest) but
+        // skip it from the surfaced array — same pattern as redacted_thinking.
+        if (text.length > 0) {
+          state.thinkingBlocks.push({ text });
+          progressMessages.push(
+            `Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`,
+          );
+        } else {
+          progressMessages.push(
+            `Thinking… (block ${state.thinkingBlockCount}, empty)`,
+          );
+        }
         break;
       }
       case "redacted_thinking":

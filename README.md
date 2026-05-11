@@ -160,7 +160,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | `persistSession` | boolean | Default `false`. When `true` (or implied by any resume param), the session is saved and can be resumed later |
 | `taskId` | string | Optional handle for `AbortTask`. If omitted, auto-generated and reported in the first progress notification |
 | `includeToolOutputs` | boolean | Default `false`. When `true`, the response payload's `toolOutputs` array carries each tool's raw stdout (truncated to 16 KB per entry). Default omits these to keep the calling agent's context small |
-| `includeThinking` | boolean | Default `false`. When `true`, payload's `thinkingBlocks` array carries the subagent's extended-thinking text (truncated to 16 KB per entry). Redacted thinking is counted in `stats.thinkingBlocks` but never surfaced as text |
+| `includeThinking` | boolean | Default `false`. When `true`, payload's `thinkingBlocks` array carries the subagent's extended-thinking text (truncated to 16 KB per entry). Two shapes are counted in `stats.thinkingBlocks` but excluded from the array: **redacted** thinking (encrypted) and **empty-text** thinking — the signed `{thinking: ""}` block Opus 4.x emits when extended thinking is enabled but the model has no reasoning text for that turn. So `stats.thinkingBlocks >= thinkingBlocks.length` |
 
 The tool returns a JSON object — same payload in `content[0].text` (compact) and `structuredContent` (parsed). The shape is declared via `outputSchema` on the tool.
 

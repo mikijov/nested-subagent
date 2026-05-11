@@ -13837,8 +13837,10 @@ function handleAssistantContent(content, state) {
 		case "thinking": {
 			state.thinkingBlockCount++;
 			const text = truncateUtf8(block.thinking ?? "", TOOL_OUTPUT_MAX_BYTES);
-			state.thinkingBlocks.push({ text });
-			progressMessages.push(`Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`);
+			if (text.length > 0) {
+				state.thinkingBlocks.push({ text });
+				progressMessages.push(`Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`);
+			} else progressMessages.push(`Thinking… (block ${state.thinkingBlockCount}, empty)`);
 			break;
 		}
 		case "redacted_thinking":
@@ -14094,7 +14096,7 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 			includeThinking: {
 				type: "boolean",
 				default: false,
-				description: "If true, append the subagent's extended-thinking content to the response under `thinkingBlocks` (each entry truncated to 16 KB). Default false — the parent receives only `stats.thinkingBlocks` count, since intermediate reasoning is what subagent isolation absorbs. Redacted thinking blocks are counted but never surfaced as text."
+				description: "If true, append the subagent's extended-thinking content to the response under `thinkingBlocks` (each entry truncated to 16 KB). Default false — the parent receives only `stats.thinkingBlocks` count, since intermediate reasoning is what subagent isolation absorbs. Two block shapes are counted but excluded from the surfaced array: redacted thinking (encrypted blob the parent can't decrypt) and empty-text thinking (Opus 4.x sometimes emits a signed-but-empty `{thinking: \"\"}` block when extended thinking is enabled but the model has no reasoning text for that turn). The result: `stats.thinkingBlocks >= thinkingBlocks.length`."
 			}
 		},
 		required: ["prompt"]
@@ -14153,7 +14155,7 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 					costUsd: { type: "number" },
 					thinkingBlocks: {
 						type: "integer",
-						description: "Count of thinking + redacted_thinking content blocks emitted by the subagent. Present only when > 0."
+						description: "Count of every thinking-shaped content block the subagent emitted: thinking (with or without text) + redacted_thinking. Present only when > 0. May exceed `thinkingBlocks.length` because redacted and empty-text blocks are counted here but excluded from the surfaced array."
 					}
 				}
 			},
@@ -14183,7 +14185,7 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 			},
 			thinkingBlocks: {
 				type: "array",
-				description: "Subagent's extended-thinking content. Present only when the caller passed `includeThinking: true`. Redacted thinking blocks are counted in `stats.thinkingBlocks` but excluded here. Each entry truncated to 16 KB.",
+				description: "Subagent's extended-thinking content. Present only when the caller passed `includeThinking: true`. Two block shapes are counted in `stats.thinkingBlocks` but excluded from this array: redacted thinking (encrypted) and empty-text thinking (signed `{thinking: \"\"}` blocks that Opus 4.x emits when extended thinking is enabled but the model has no reasoning text for the turn). Each entry truncated to 16 KB.",
 				items: {
 					type: "object",
 					properties: { text: { type: "string" } },
