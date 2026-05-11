@@ -34,6 +34,20 @@ describe("handleAssistantContent — thinking blocks", () => {
     expect(unknownBlockTypes).toEqual([]);
   });
 
+  it("eagerly truncates oversize thinking blocks at push time", () => {
+    const state = makeState();
+    const oversize = "x".repeat(20 * 1024); // 20 KB ASCII = 20 KB bytes
+    handleAssistantContent(
+      [{ type: "thinking", thinking: oversize }],
+      state,
+    );
+    const droppedBytes = 20 * 1024 - TOOL_OUTPUT_MAX_BYTES;
+    expect(state.thinkingBlocks).toHaveLength(1);
+    expect(
+      state.thinkingBlocks[0].text.endsWith(`…[truncated ${droppedBytes} bytes]`),
+    ).toBe(true);
+  });
+
   it("counts a redacted_thinking block but does not surface its text", () => {
     const state = makeState();
     const { progressMessages, unknownBlockTypes } = handleAssistantContent(
@@ -126,22 +140,42 @@ describe("buildTaskPayload — thinking surfacing", () => {
     expect(payload.thinkingBlocks).toEqual([{ text: "a" }, { text: "b" }]);
   });
 
-  it("truncates oversize thinking entries with the shared marker", () => {
-    const oversize = "x".repeat(20 * 1024); // 20 KB ASCII = 20 KB bytes
+  it("passes through pre-truncated thinking entries unchanged", () => {
+    // Truncation now happens eagerly in handleAssistantContent. buildTaskPayload
+    // is a pass-through; the dedicated truncation test lives in the
+    // handleAssistantContent block.
+    const text = "already-bounded";
     const payload = buildTaskPayload(
       {
         ...baseSuccess,
         thinkingBlockCount: 1,
-        thinkingBlocks: [{ text: oversize }],
+        thinkingBlocks: [{ text }],
       },
       false,
       true,
     );
-    const droppedBytes = 20 * 1024 - TOOL_OUTPUT_MAX_BYTES;
-    expect(payload.thinkingBlocks).toHaveLength(1);
-    expect(payload.thinkingBlocks?.[0].text.endsWith(
-      `…[truncated ${droppedBytes} bytes]`,
-    )).toBe(true);
+    expect(payload.thinkingBlocks).toEqual([{ text }]);
+  });
+
+  it("surfaces thinkingBlocks even on a failed result", () => {
+    const payload = buildTaskPayload(
+      {
+        success: false,
+        error: "boom",
+        errorKind: "exit_nonzero",
+        taskId: "task-test",
+        thinkingBlockCount: 1,
+        thinkingBlocks: [{ text: "y" }],
+      },
+      false,
+      true,
+    );
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toBe("boom");
+    expect(payload.errorKind).toBe("exit_nonzero");
+    expect(payload.stats?.thinkingBlocks).toBe(1);
+    expect(payload.thinkingBlocks).toEqual([{ text: "y" }]);
+    expect(payload.result).toBeUndefined();
   });
 
   it("excludes redacted blocks from thinkingBlocks while counting them", () => {

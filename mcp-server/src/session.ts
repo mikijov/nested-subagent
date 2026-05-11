@@ -381,7 +381,14 @@ export function handleAssistantContent(
         break;
       case "thinking": {
         state.thinkingBlockCount++;
-        const text = block.thinking ?? "";
+        // Truncate eagerly to bound the in-memory accumulator on verbose
+        // extended-thinking runs. Single source of truth — buildTaskPayload
+        // passes through, so a re-truncation pass can't clobber the
+        // dropped-byte marker.
+        const text = truncateUtf8(
+          block.thinking ?? "",
+          TOOL_OUTPUT_MAX_BYTES,
+        );
         state.thinkingBlocks.push({ text });
         progressMessages.push(
           `Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`,
@@ -453,9 +460,8 @@ export function buildTaskPayload(
     result.thinkingBlocks &&
     result.thinkingBlocks.length > 0
   ) {
-    payload.thinkingBlocks = result.thinkingBlocks.map((tb) => ({
-      text: truncateUtf8(tb.text, TOOL_OUTPUT_MAX_BYTES),
-    }));
+    // Already truncated eagerly in handleAssistantContent — pass through.
+    payload.thinkingBlocks = result.thinkingBlocks;
   }
 
   return payload;

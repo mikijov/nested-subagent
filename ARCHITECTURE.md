@@ -207,6 +207,7 @@ The MCP server (`mcp-server/src/index.ts`) works by:
 
   // Response shape
   includeToolOutputs?: boolean,  // default false; include raw tool stdouts (each truncated to 16 KB)
+  includeThinking?: boolean,     // default false; include extended-thinking text (each truncated to 16 KB; redacted blocks counted but never surfaced)
 }
 
 // AbortTask tool — sibling for out-of-band cancellation
@@ -237,12 +238,15 @@ proc.stdin?.end();  // CRITICAL: Close stdin immediately
 
 #### Debug Logging
 
-All operations are logged to `<os.tmpdir()>/nested-subagent-debug.log`. The file
-is created with mode `0600` so the captured prompts, system prompts, and child
-stderr can't be read by other local users on shared hosts.
+All operations are logged to `<os.tmpdir()>/nested-subagent-debug-<pid>.log`. The
+file is created with mode `0600` so the captured prompts, system prompts, and
+child stderr can't be read by other local users on shared hosts. The filename is
+per-pid because every nested `claude -p` brings up its own MCP server — a fixed
+filename would have each spawn truncate the parent's log on startup, making
+nested-workflow debugging unreadable.
 
 ```typescript
-const LOG_FILE = path.join(os.tmpdir(), "nested-subagent-debug.log");
+const LOG_FILE = path.join(os.tmpdir(), `nested-subagent-debug-${process.pid}.log`);
 
 // On startup: unlink first so writeFileSync's mode option applies (it only
 // takes effect on file creation, not when truncating an existing file).
@@ -272,6 +276,7 @@ function log(message: string) {
 | **Budget control** | None | Per-task limits |
 | **Abort mechanism** | `abortController` | SIGTERM/SIGKILL + sibling `AbortTask` tool |
 | **Session lifecycle** | --resume only | resume / continue / sessionId / fork-session |
+| **Extended thinking visibility** | Not exposed | Counts always; text opt-in via `includeThinking` |
 
 ### Advantages of Nested-SubAgent Plugin
 

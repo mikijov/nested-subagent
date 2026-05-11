@@ -13836,7 +13836,7 @@ function handleAssistantContent(content, state) {
 			break;
 		case "thinking": {
 			state.thinkingBlockCount++;
-			const text = block.thinking ?? "";
+			const text = truncateUtf8(block.thinking ?? "", TOOL_OUTPUT_MAX_BYTES);
 			state.thinkingBlocks.push({ text });
 			progressMessages.push(`Thinking… (block ${state.thinkingBlockCount}, ~${text.length} chars)`);
 			break;
@@ -13882,7 +13882,7 @@ function buildTaskPayload(result, includeToolOutputs, includeThinking) {
 		if (result.error !== void 0) payload.error = result.error;
 		if (result.errorKind !== void 0) payload.errorKind = result.errorKind;
 	}
-	if (includeThinking && result.thinkingBlocks && result.thinkingBlocks.length > 0) payload.thinkingBlocks = result.thinkingBlocks.map((tb) => ({ text: truncateUtf8(tb.text, TOOL_OUTPUT_MAX_BYTES) }));
+	if (includeThinking && result.thinkingBlocks && result.thinkingBlocks.length > 0) payload.thinkingBlocks = result.thinkingBlocks;
 	return payload;
 }
 
@@ -13918,7 +13918,7 @@ var version = "3.0.0";
 *             └── Returns final result when complete
 * ```
 */
-const LOG_FILE = join(tmpdir(), "nested-subagent-debug.log");
+const LOG_FILE = join(tmpdir(), `nested-subagent-debug-${process.pid}.log`);
 function log(message) {
 	const logLine = `[${(/* @__PURE__ */ new Date()).toISOString()}] ${message}\n`;
 	try {

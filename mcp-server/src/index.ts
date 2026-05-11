@@ -39,6 +39,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   type ActiveTaskEntry,
+  type AssistantContentBlock,
   type ProgressState,
   type RunTaskResult,
   type TaskInput,
@@ -55,8 +56,9 @@ import pkg from "../package.json" with { type: "json" };
 
 // Debug log lives in os.tmpdir() with mode 0600 — the file captures prompts,
 // system prompts, and child stderr, so it must not be world-readable on
-// shared hosts.
-const LOG_FILE = join(tmpdir(), "nested-subagent-debug.log");
+// shared hosts. The filename is per-pid so nested spawns (each running its
+// own MCP server) don't clobber the parent's log on startup.
+const LOG_FILE = join(tmpdir(), `nested-subagent-debug-${process.pid}.log`);
 function log(message: string) {
   const timestamp = new Date().toISOString();
   const logLine = `[${timestamp}] ${message}\n`;
@@ -82,21 +84,7 @@ interface StreamMessage {
   type: "system" | "assistant" | "user" | "result";
   subtype?: string;
   message?: {
-    content: Array<{
-      type:
-        | "text"
-        | "tool_use"
-        | "tool_result"
-        | "thinking"
-        | "redacted_thinking"
-        | "server_tool_use";
-      text?: string;
-      name?: string;
-      id?: string;
-      input?: Record<string, unknown>;
-      content?: string;
-      thinking?: string;
-    }>;
+    content: AssistantContentBlock[];
   };
   session_id?: string;
   uuid?: string;

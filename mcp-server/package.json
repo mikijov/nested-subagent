@@ -3,11 +3,11 @@
   "version": "3.0.0",
   "description": "MCP server that enables unlimited nested subagents by spawning fresh Claude processes",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/index.mjs",
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/index.js",
+    "start": "node dist/index.mjs",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -25,6 +25,6 @@
     "vitest": "^2.1.8"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.20.0"
   }
 }
