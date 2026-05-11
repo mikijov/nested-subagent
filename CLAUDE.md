@@ -107,10 +107,11 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 | `prompt`             | string   | Required.                                                            |
 | `description`        | string   | 3–5 word UI summary.                                                 |
 | `model`              | enum     | `sonnet` (default) \| `opus` \| `haiku`.                             |
+| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Maps to `--effort` (extended thinking budget). Omit to use `claude`'s default. |
 | `workingDir`         | string   | Defaults to `process.cwd()`.                                         |
 | `timeout`            | number   | Milliseconds. Default `600000` (10 min).                             |
 | `allowWrite`         | boolean  | Adds `--dangerously-skip-permissions` (mutually exclusive w/ below). |
-| `permissionMode`     | enum     | `acceptEdits` \| `auto` \| `bypassPermissions` \| `default` \| `dontAsk` \| `plan`. |
+| `permissionMode`     | enum     | `acceptEdits` \| `auto` \| `bypassPermissions` \| `default` \| `dontAsk` \| `plan`. Default `auto`. Ignored when `allowWrite` is true. |
 | `systemPrompt`       | string   | `--system-prompt`.                                                   |
 | `appendSystemPrompt` | string   | `--append-system-prompt`.                                            |
 | `allowedTools`       | string[] | `--allowed-tools`.                                                   |

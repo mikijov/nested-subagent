@@ -13730,7 +13730,7 @@ function validateSessionParams(input) {
 * applied here too so the bundled bin can be tested end-to-end.
 */
 function buildClaudeArgs(input, env = {}) {
-	const { prompt, model = "sonnet", allowWrite = false, permissionMode, systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession } = input;
+	const { prompt, model = "sonnet", allowWrite = false, permissionMode, effort, systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession } = input;
 	const args = [
 		"-p",
 		prompt,
@@ -13740,8 +13740,9 @@ function buildClaudeArgs(input, env = {}) {
 		"--model",
 		model
 	];
+	if (effort) args.push("--effort", effort);
 	if (allowWrite) args.push("--dangerously-skip-permissions");
-	else if (permissionMode) args.push("--permission-mode", permissionMode);
+	else args.push("--permission-mode", permissionMode ?? "auto");
 	if (systemPrompt) args.push("--system-prompt", systemPrompt);
 	if (appendSystemPrompt) args.push("--append-system-prompt", appendSystemPrompt);
 	if (allowedTools && allowedTools.length > 0) args.push("--allowed-tools", ...allowedTools);
@@ -13849,6 +13850,17 @@ Usage notes:
 				default: "sonnet",
 				description: "Model to use (default: sonnet)"
 			},
+			effort: {
+				type: "string",
+				enum: [
+					"low",
+					"medium",
+					"high",
+					"xhigh",
+					"max"
+				],
+				description: "Extended thinking budget for the spawned subagent (maps to --effort). Omit to use claude's default."
+			},
 			workingDir: {
 				type: "string",
 				description: "Working directory (defaults to current)"
@@ -13873,7 +13885,8 @@ Usage notes:
 					"dontAsk",
 					"plan"
 				],
-				description: "Permission mode for the spawned subagent"
+				default: "auto",
+				description: "Permission mode for the spawned subagent (default: auto). Ignored when allowWrite is true."
 			},
 			systemPrompt: {
 				type: "string",

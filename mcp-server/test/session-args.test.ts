@@ -151,4 +151,26 @@ describe("buildClaudeArgs", () => {
     const args = buildClaudeArgs(base, {});
     expect(hasFlag(args, "--plugin-dir")).toBe(false);
   });
+
+  it("effort: --effort <level> is emitted when provided", () => {
+    const args = buildClaudeArgs({ ...base, effort: "high" });
+    expect(flagValue(args, "--effort")).toBe("high");
+  });
+
+  it("effort: --effort is absent when unset", () => {
+    const args = buildClaudeArgs(base);
+    expect(hasFlag(args, "--effort")).toBe(false);
+  });
+
+  it("permissionMode: defaults to --permission-mode auto when neither permissionMode nor allowWrite is set", () => {
+    const args = buildClaudeArgs(base);
+    expect(flagValue(args, "--permission-mode")).toBe("auto");
+    expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
+  });
+
+  it("permissionMode: allowWrite suppresses --permission-mode default (mutual exclusivity preserved)", () => {
+    const args = buildClaudeArgs({ ...base, allowWrite: true });
+    expect(hasFlag(args, "--permission-mode")).toBe(false);
+    expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(true);
+  });
 });

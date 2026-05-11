@@ -131,6 +131,11 @@ Usage notes:
         default: "sonnet",
         description: "Model to use (default: sonnet)",
       },
+      effort: {
+        type: "string",
+        enum: ["low", "medium", "high", "xhigh", "max"],
+        description: "Extended thinking budget for the spawned subagent (maps to --effort). Omit to use claude's default.",
+      },
       workingDir: {
         type: "string",
         description: "Working directory (defaults to current)",
@@ -148,7 +153,8 @@ Usage notes:
       permissionMode: {
         type: "string",
         enum: ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"],
-        description: "Permission mode for the spawned subagent",
+        default: "auto",
+        description: "Permission mode for the spawned subagent (default: auto). Ignored when allowWrite is true.",
       },
       systemPrompt: {
         type: "string",

@@ -19,6 +19,7 @@ export interface TaskInput {
     | "default"
     | "dontAsk"
     | "plan";
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
   systemPrompt?: string;
   appendSystemPrompt?: string;
   allowedTools?: string[];
@@ -102,6 +103,7 @@ export function buildClaudeArgs(
     model = "sonnet",
     allowWrite = false,
     permissionMode,
+    effort,
     systemPrompt,
     appendSystemPrompt,
     allowedTools,
@@ -124,10 +126,14 @@ export function buildClaudeArgs(
     model,
   ];
 
+  if (effort) {
+    args.push("--effort", effort);
+  }
+
   if (allowWrite) {
     args.push("--dangerously-skip-permissions");
-  } else if (permissionMode) {
-    args.push("--permission-mode", permissionMode);
+  } else {
+    args.push("--permission-mode", permissionMode ?? "auto");
   }
 
   if (systemPrompt) args.push("--system-prompt", systemPrompt);

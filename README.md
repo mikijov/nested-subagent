@@ -118,6 +118,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | **System prompt control** | ❌ | ✅ Full control | ✅ Implemented |
 | **Tool restrictions** | ❌ | ✅ allowed / disallowed | ✅ Implemented |
 | **Budget limits** | ❌ | ✅ maxBudgetUsd | ✅ Implemented |
+| **Extended thinking budget** | ❌ | ✅ effort low/medium/high/xhigh/max | ✅ Implemented |
 | **Resume support** | ✅ --resume | ✅ resume / continue / sessionId / fork | ✅ Implemented |
 | **Background execution** | ✅ run_in_background | ❌ | 🔲 Planned |
 | **Normalized messages** | ✅ Full tree | Text only | 🔲 Planned |
@@ -139,7 +140,9 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | `prompt` | string | **Required.** The task for the agent |
 | `description` | string | Short summary for UI display (3-5 words) |
 | `model` | string | `sonnet`, `opus`, or `haiku` (default: sonnet) |
+| `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget. Omit for `claude`'s default |
 | `allowWrite` | boolean | Enable write permissions |
+| `permissionMode` | string | `acceptEdits` / `auto` / `bypassPermissions` / `default` / `dontAsk` / `plan`. Default `auto`. Ignored when `allowWrite` is true |
 | `timeout` | number | Timeout in ms (default: 600000) |
 | `systemPrompt` | string | Custom system prompt |
 | `allowedTools` | string[] | Restrict to specific tools |
