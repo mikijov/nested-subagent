@@ -48,6 +48,7 @@ import {
   computeEffectivePersist,
   handleAbort,
   handleAssistantContent,
+  handleUserContent,
   shutdownChildren,
   validatePermissionParams,
   validateSessionParams,
@@ -80,11 +81,18 @@ try {
 }
 
 // Types for Claude CLI stream-json output
+interface UserToolResultBlock {
+  type: string;
+  tool_use_id?: string;
+  content?: string;
+  is_error?: boolean;
+}
+
 interface StreamMessage {
   type: "system" | "assistant" | "user" | "result";
   subtype?: string;
   message?: {
-    content: AssistantContentBlock[];
+    content: Array<AssistantContentBlock | UserToolResultBlock>;
   };
   session_id?: string;
   uuid?: string;
@@ -98,11 +106,10 @@ interface StreamMessage {
     cache_read_input_tokens?: number;
     cache_creation_input_tokens?: number;
   };
-  tool_use_result?: {
-    stdout?: string;
-    stderr?: string;
-    interrupted?: boolean;
-  };
+  // Object on success, bare string on error/permission-denied paths.
+  tool_use_result?:
+    | string
+    | { stdout?: string; stderr?: string; interrupted?: boolean };
 }
 
 // Tool definition - named "Task" to match native Task tool UX
@@ -436,7 +443,7 @@ async function runTask(
 
   const state: ProgressState = {
     toolUseCount: 0,
-    currentToolUse: null,
+    toolUseNamesById: new Map<string, string>(),
     startTime: Date.now(),
     toolOutputs: [],
     toolUseCounts: new Map<string, number>(),
@@ -550,15 +557,14 @@ async function runTask(
             break;
 
           case "user":
-            if (msg.tool_use_result) {
-              const stdout = msg.tool_use_result.stdout || "";
-              if (stdout && state.currentToolUse) {
-                state.toolOutputs.push({
-                  tool: state.currentToolUse,
-                  output: stdout,
-                });
-              }
+            if (msg.tool_use_result !== undefined) {
+              handleUserContent(msg.message, msg.tool_use_result, state);
               if (progressToken !== undefined) {
+                const stdout =
+                  typeof msg.tool_use_result === "object" &&
+                  msg.tool_use_result !== null
+                    ? msg.tool_use_result.stdout ?? ""
+                    : "";
                 const resultPreview = stdout.slice(0, 50) || "(no output)";
                 server.notification({
                   method: "notifications/progress",

@@ -269,7 +269,7 @@ export interface ThinkingBlock {
 
 export interface ProgressState {
   toolUseCount: number;
-  currentToolUse: string | null;
+  toolUseNamesById: Map<string, string>;
   startTime: number;
   toolOutputs: ToolOutput[];
   toolUseCounts: Map<string, number>;
@@ -345,6 +345,22 @@ export interface AssistantContentBlock {
   thinking?: string;
 }
 
+export interface ToolResultBlock {
+  type: string;
+  tool_use_id?: string;
+  content?: string;
+  is_error?: boolean;
+}
+
+export interface UserMessageEnvelope {
+  content: ToolResultBlock[];
+}
+
+export type ToolUseResultSidecar =
+  | string
+  | { stdout?: string; stderr?: string; interrupted?: boolean }
+  | undefined;
+
 /**
  * Pure parser for a single assistant message's content array. Mutates
  * `state` (tool counters, thinking counters, tool/thinking accumulators) and
@@ -362,7 +378,9 @@ export function handleAssistantContent(
       case "tool_use":
         if (block.name) {
           state.toolUseCount++;
-          state.currentToolUse = block.name;
+          if (block.id) {
+            state.toolUseNamesById.set(block.id, block.name);
+          }
           state.toolUseCounts.set(
             block.name,
             (state.toolUseCounts.get(block.name) ?? 0) + 1,
@@ -408,6 +426,41 @@ export function handleAssistantContent(
     }
   }
   return { progressMessages, unknownBlockTypes };
+}
+
+/**
+ * Pure parser for a single user-event message: correlates each tool_result
+ * block to the tool name recorded under its tool_use_id by an earlier
+ * handleAssistantContent pass, and pushes the sidecar stdout into
+ * state.toolOutputs. Side-effect free beyond `state`.
+ *
+ * Gating: only the object-form sidecar with non-empty stdout produces a push.
+ * String form (error/permission-denied path), missing sidecar, and empty
+ * stdout are all skipped — uniformly for known and unknown ids — so labelling
+ * errors never create ghost rows. Unknown ids that *do* clear the gate are
+ * labelled "(unknown)" rather than mis-attributed.
+ */
+export function handleUserContent(
+  message: UserMessageEnvelope | undefined,
+  toolUseResult: ToolUseResultSidecar,
+  state: ProgressState,
+): void {
+  if (!message?.content) return;
+  const stdout =
+    typeof toolUseResult === "object" && toolUseResult !== null
+      ? toolUseResult.stdout ?? ""
+      : "";
+  if (!stdout) return;
+  for (const block of message.content) {
+    if (block.type !== "tool_result") continue;
+    const id = block.tool_use_id;
+    const name =
+      id !== undefined ? state.toolUseNamesById.get(id) : undefined;
+    state.toolOutputs.push({
+      tool: name ?? "(unknown)",
+      output: stdout,
+    });
+  }
 }
 
 /**

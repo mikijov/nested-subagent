@@ -13826,7 +13826,7 @@ function handleAssistantContent(content, state) {
 		case "tool_use":
 			if (block.name) {
 				state.toolUseCount++;
-				state.currentToolUse = block.name;
+				if (block.id) state.toolUseNamesById.set(block.id, block.name);
 				state.toolUseCounts.set(block.name, (state.toolUseCounts.get(block.name) ?? 0) + 1);
 				progressMessages.push(`Tool: ${block.name}${block.input ? ` (${JSON.stringify(block.input).slice(0, 50)}...)` : ""}`);
 			}
@@ -13851,6 +13851,32 @@ function handleAssistantContent(content, state) {
 		progressMessages,
 		unknownBlockTypes
 	};
+}
+/**
+* Pure parser for a single user-event message: correlates each tool_result
+* block to the tool name recorded under its tool_use_id by an earlier
+* handleAssistantContent pass, and pushes the sidecar stdout into
+* state.toolOutputs. Side-effect free beyond `state`.
+*
+* Gating: only the object-form sidecar with non-empty stdout produces a push.
+* String form (error/permission-denied path), missing sidecar, and empty
+* stdout are all skipped — uniformly for known and unknown ids — so labelling
+* errors never create ghost rows. Unknown ids that *do* clear the gate are
+* labelled "(unknown)" rather than mis-attributed.
+*/
+function handleUserContent(message, toolUseResult, state) {
+	if (!message?.content) return;
+	const stdout = typeof toolUseResult === "object" && toolUseResult !== null ? toolUseResult.stdout ?? "" : "";
+	if (!stdout) return;
+	for (const block of message.content) {
+		if (block.type !== "tool_result") continue;
+		const id = block.tool_use_id;
+		const name = id !== void 0 ? state.toolUseNamesById.get(id) : void 0;
+		state.toolOutputs.push({
+			tool: name ?? "(unknown)",
+			output: stdout
+		});
+	}
 }
 /**
 * Project a RunTaskResult into the wire-shape returned by the MCP tool. Pure:
@@ -14233,7 +14259,7 @@ async function runTask(input, progressToken) {
 	const args = buildClaudeArgs(input, { CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT });
 	const state = {
 		toolUseCount: 0,
-		currentToolUse: null,
+		toolUseNamesById: /* @__PURE__ */ new Map(),
 		startTime: Date.now(),
 		toolOutputs: [],
 		toolUseCounts: /* @__PURE__ */ new Map(),
@@ -14319,13 +14345,10 @@ async function runTask(input, progressToken) {
 						}
 						break;
 					case "user":
-						if (msg.tool_use_result) {
-							const stdout = msg.tool_use_result.stdout || "";
-							if (stdout && state.currentToolUse) state.toolOutputs.push({
-								tool: state.currentToolUse,
-								output: stdout
-							});
+						if (msg.tool_use_result !== void 0) {
+							handleUserContent(msg.message, msg.tool_use_result, state);
 							if (progressToken !== void 0) {
+								const stdout = typeof msg.tool_use_result === "object" && msg.tool_use_result !== null ? msg.tool_use_result.stdout ?? "" : "";
 								const resultPreview = stdout.slice(0, 50) || "(no output)";
 								server.notification({
 									method: "notifications/progress",

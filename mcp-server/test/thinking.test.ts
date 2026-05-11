@@ -11,7 +11,7 @@ import {
 function makeState(): ProgressState {
   return {
     toolUseCount: 0,
-    currentToolUse: null,
+    toolUseNamesById: new Map<string, string>(),
     startTime: 0,
     toolOutputs: [],
     toolUseCounts: new Map<string, number>(),
