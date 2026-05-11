@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildClaudeArgs, type TaskInput } from "../src/session.js";
+import {
+  buildClaudeArgs,
+  READ_ONLY_FILES_PROMPT,
+  validatePermissionParams,
+  type TaskInput,
+} from "../src/session.js";
 
 function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
@@ -9,6 +14,17 @@ function flagValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx < 0 || idx === args.length - 1) return undefined;
   return args[idx + 1];
+}
+
+function flagAllValues(args: string[], flag: string): string[] {
+  const idx = args.indexOf(flag);
+  if (idx < 0) return [];
+  const values: string[] = [];
+  for (let i = idx + 1; i < args.length; i++) {
+    if (args[i].startsWith("--")) break;
+    values.push(args[i]);
+  }
+  return values;
 }
 
 describe("buildClaudeArgs", () => {
@@ -117,15 +133,18 @@ describe("buildClaudeArgs", () => {
       appendSystemPrompt: "also concise",
       resume: "u-7",
     });
-    expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(true);
+    // allowWrite=true no longer triggers --dangerously-skip-permissions;
+    // permissionMode default (auto) is used.
+    expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
+    expect(flagValue(args, "--permission-mode")).toBe("auto");
     // --allowed-tools is followed by each tool as a separate arg
-    const allowedIdx = args.indexOf("--allowed-tools");
-    expect(args.slice(allowedIdx + 1, allowedIdx + 3)).toEqual(["Bash", "Read"]);
-    expect(flagValue(args, "--disallowed-tools")).toBe("WebFetch");
-    const addDirIdx = args.indexOf("--add-dir");
-    expect(args.slice(addDirIdx + 1, addDirIdx + 3)).toEqual(["/tmp/a", "/tmp/b"]);
+    expect(flagAllValues(args, "--allowed-tools")).toEqual(["Bash", "Read"]);
+    // allowWrite=true means no Write/Edit/NotebookEdit appended
+    expect(flagAllValues(args, "--disallowed-tools")).toEqual(["WebFetch"]);
+    expect(flagAllValues(args, "--add-dir")).toEqual(["/tmp/a", "/tmp/b"]);
     expect(flagValue(args, "--max-budget-usd")).toBe("0.5");
     expect(flagValue(args, "--system-prompt")).toBe("be brief");
+    // allowWrite=true means the read-only hint is NOT appended
     expect(flagValue(args, "--append-system-prompt")).toBe("also concise");
     expect(flagValue(args, "--resume")).toBe("u-7");
   });
@@ -138,6 +157,15 @@ describe("buildClaudeArgs", () => {
     });
     expect(flagValue(args, "--permission-mode")).toBe("acceptEdits");
     expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
+    // allowWrite=false adds the write-tool denylist and the read-only hint
+    expect(flagAllValues(args, "--disallowed-tools")).toEqual([
+      "Write",
+      "Edit",
+      "NotebookEdit",
+    ]);
+    expect(flagValue(args, "--append-system-prompt")).toBe(
+      READ_ONLY_FILES_PROMPT,
+    );
   });
 
   it("propagates CLAUDE_PLUGIN_ROOT via --plugin-dir when present", () => {
@@ -162,15 +190,143 @@ describe("buildClaudeArgs", () => {
     expect(flagValue(args, "--effort")).toBe("xhigh");
   });
 
-  it("permissionMode: defaults to --permission-mode auto when neither permissionMode nor allowWrite is set", () => {
+  it("permissionMode: defaults to --permission-mode auto when neither permissionMode nor dangerouslySkipPermissions is set", () => {
     const args = buildClaudeArgs(base);
     expect(flagValue(args, "--permission-mode")).toBe("auto");
     expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
   });
 
-  it("permissionMode: allowWrite suppresses --permission-mode default (mutual exclusivity preserved)", () => {
-    const args = buildClaudeArgs({ ...base, allowWrite: true });
-    expect(hasFlag(args, "--permission-mode")).toBe(false);
-    expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(true);
+  describe("allowWrite (file-modification gate)", () => {
+    it("defaults to false: appends Write/Edit/NotebookEdit to --disallowed-tools", () => {
+      const args = buildClaudeArgs(base);
+      expect(flagAllValues(args, "--disallowed-tools")).toEqual([
+        "Write",
+        "Edit",
+        "NotebookEdit",
+      ]);
+    });
+
+    it("defaults to false: appends the read-only-files system prompt", () => {
+      const args = buildClaudeArgs(base);
+      expect(flagValue(args, "--append-system-prompt")).toBe(
+        READ_ONLY_FILES_PROMPT,
+      );
+    });
+
+    it("false + user-provided disallowedTools merges (deduped) with write tools", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        disallowedTools: ["WebFetch", "Edit"], // Edit duplicates; should appear once
+      });
+      const disallowed = flagAllValues(args, "--disallowed-tools");
+      expect(disallowed).toEqual(["WebFetch", "Edit", "Write", "NotebookEdit"]);
+    });
+
+    it("false + user-provided appendSystemPrompt joins with the read-only hint by \\n\\n", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        appendSystemPrompt: "extra",
+      });
+      expect(flagValue(args, "--append-system-prompt")).toBe(
+        `extra\n\n${READ_ONLY_FILES_PROMPT}`,
+      );
+    });
+
+    it("true: does NOT add write tools to --disallowed-tools", () => {
+      const args = buildClaudeArgs({ ...base, allowWrite: true });
+      // No --disallowed-tools flag at all when nothing is disallowed
+      expect(hasFlag(args, "--disallowed-tools")).toBe(false);
+    });
+
+    it("true: does NOT add the read-only-files system prompt", () => {
+      const args = buildClaudeArgs({ ...base, allowWrite: true });
+      expect(hasFlag(args, "--append-system-prompt")).toBe(false);
+    });
+
+    it("true: still emits --permission-mode (no suppression)", () => {
+      const args = buildClaudeArgs({ ...base, allowWrite: true });
+      expect(flagValue(args, "--permission-mode")).toBe("auto");
+      expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
+    });
+  });
+
+  describe("dangerouslySkipPermissions", () => {
+    it("true: emits --dangerously-skip-permissions and suppresses --permission-mode", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        dangerouslySkipPermissions: true,
+      });
+      expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(true);
+      expect(hasFlag(args, "--permission-mode")).toBe(false);
+    });
+
+    it("true + allowWrite=false still emits the write-tool denylist (independent of permission flag)", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        dangerouslySkipPermissions: true,
+        allowWrite: false,
+      });
+      expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(true);
+      expect(flagAllValues(args, "--disallowed-tools")).toEqual([
+        "Write",
+        "Edit",
+        "NotebookEdit",
+      ]);
+      expect(flagValue(args, "--append-system-prompt")).toBe(
+        READ_ONLY_FILES_PROMPT,
+      );
+    });
+
+    it("false (default): emits --permission-mode auto, no --dangerously-skip-permissions", () => {
+      const args = buildClaudeArgs(base);
+      expect(flagValue(args, "--permission-mode")).toBe("auto");
+      expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
+    });
+  });
+});
+
+describe("validatePermissionParams", () => {
+  it("rejects dangerouslySkipPermissions=true combined with permissionMode", () => {
+    const err = validatePermissionParams({
+      prompt: "x",
+      dangerouslySkipPermissions: true,
+      permissionMode: "auto",
+    });
+    expect(err).toMatch(/dangerouslySkipPermissions cannot be combined/);
+  });
+
+  it("accepts dangerouslySkipPermissions alone", () => {
+    expect(
+      validatePermissionParams({
+        prompt: "x",
+        dangerouslySkipPermissions: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts permissionMode alone", () => {
+    expect(
+      validatePermissionParams({ prompt: "x", permissionMode: "acceptEdits" }),
+    ).toBeNull();
+  });
+
+  it("accepts allowWrite alone (with no permissionMode or dangerouslySkipPermissions)", () => {
+    expect(
+      validatePermissionParams({ prompt: "x", allowWrite: true }),
+    ).toBeNull();
+  });
+
+  it("accepts dangerouslySkipPermissions + allowWrite=false (denylist + bypass is legal)", () => {
+    expect(
+      validatePermissionParams({
+        prompt: "x",
+        dangerouslySkipPermissions: true,
+        allowWrite: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts an empty input", () => {
+    expect(validatePermissionParams({ prompt: "x" })).toBeNull();
   });
 });

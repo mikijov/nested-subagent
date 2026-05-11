@@ -18,6 +18,7 @@ export interface TaskInput {
     | "default"
     | "dontAsk"
     | "plan";
+  dangerouslySkipPermissions?: boolean;
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -98,6 +99,23 @@ export function validateSessionParams(input: TaskInput): string | null {
 }
 
 /**
+ * Returns an error message if dangerouslySkipPermissions is combined with
+ * permissionMode (the former disables all permission machinery, making the
+ * latter meaningless), otherwise null.
+ */
+export function validatePermissionParams(input: TaskInput): string | null {
+  if (input.dangerouslySkipPermissions && input.permissionMode !== undefined) {
+    return "dangerouslySkipPermissions cannot be combined with permissionMode (the former disables all permission prompts, making the latter ineffective)";
+  }
+  return null;
+}
+
+export const WRITE_TOOLS = ["Write", "Edit", "NotebookEdit"] as const;
+
+export const READ_ONLY_FILES_PROMPT =
+  "You are running with file modification disabled. You may read files and run analysis commands, but you must not create, modify, or delete files using Write, Edit, or NotebookEdit. Bash redirects, sed -i, tee, and similar shell-based file modification are also off-limits even though they are not hard-blocked.";
+
+/**
  * Build the full claude-CLI argv (excluding the `claude` exe itself) for a
  * Task input. Pure: no env reads, no spawn. The plugin-root propagation is
  * applied here too so the bundled bin can be tested end-to-end.
@@ -111,6 +129,7 @@ export function buildClaudeArgs(
     model = "opus",
     allowWrite = false,
     permissionMode,
+    dangerouslySkipPermissions = false,
     effort = "xhigh",
     systemPrompt,
     appendSystemPrompt,
@@ -136,21 +155,30 @@ export function buildClaudeArgs(
 
   args.push("--effort", effort);
 
-  if (allowWrite) {
+  if (dangerouslySkipPermissions) {
     args.push("--dangerously-skip-permissions");
   } else {
     args.push("--permission-mode", permissionMode ?? "auto");
   }
 
   if (systemPrompt) args.push("--system-prompt", systemPrompt);
-  if (appendSystemPrompt)
-    args.push("--append-system-prompt", appendSystemPrompt);
+
+  const mergedAppendSP = [
+    appendSystemPrompt,
+    allowWrite ? null : READ_ONLY_FILES_PROMPT,
+  ]
+    .filter((s): s is string => Boolean(s))
+    .join("\n\n");
+  if (mergedAppendSP) args.push("--append-system-prompt", mergedAppendSP);
 
   if (allowedTools && allowedTools.length > 0) {
     args.push("--allowed-tools", ...allowedTools);
   }
-  if (disallowedTools && disallowedTools.length > 0) {
-    args.push("--disallowed-tools", ...disallowedTools);
+
+  const effectiveDisallowed = new Set<string>(disallowedTools ?? []);
+  if (!allowWrite) for (const t of WRITE_TOOLS) effectiveDisallowed.add(t);
+  if (effectiveDisallowed.size > 0) {
+    args.push("--disallowed-tools", ...effectiveDisallowed);
   }
 
   if (maxBudgetUsd !== undefined) {

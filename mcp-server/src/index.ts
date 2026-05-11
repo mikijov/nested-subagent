@@ -45,6 +45,7 @@ import {
   computeEffectivePersist,
   handleAbort,
   shutdownChildren,
+  validatePermissionParams,
   validateSessionParams,
 } from "./session.js";
 
@@ -121,7 +122,7 @@ Session chaining: pass \`persistSession: true\` (or \`resume\`/\`continueRecent\
 
 Abort: pass an explicit \`taskId\` (or read the auto-generated one from the first progress notification) and call the sibling \`AbortTask\` tool.
 
-Defaults: model=opus, effort=xhigh, permissionMode=auto, persistSession=false, timeout=600000ms.`,
+Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persistSession=false, timeout=600000ms. When allowWrite=false (the default), Write/Edit/NotebookEdit are added to --disallowed-tools and the subagent is told it is in read-only-files mode.`,
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -153,13 +154,18 @@ Defaults: model=opus, effort=xhigh, permissionMode=auto, persistSession=false, t
       allowWrite: {
         type: "boolean",
         default: false,
-        description: "Enable file write permissions (--dangerously-skip-permissions)",
+        description: "Narrow gate on file-modifying tools. When false (default), Write/Edit/NotebookEdit are appended to --disallowed-tools and a read-only-files system-prompt note is added so the subagent plans around the restriction. When true, those tools are permitted (subject to permissionMode). Note: Bash is NOT blocked — shell-based file writes (`bash -c 'echo x > file'`, `sed -i`, `tee`, etc.) remain possible and are only discouraged via the system-prompt note.",
       },
       permissionMode: {
         type: "string",
         enum: ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"],
         default: "auto",
-        description: "Permission mode for the spawned subagent (default: auto). Ignored when allowWrite is true.",
+        description: "Permission mode for the spawned subagent (default: auto). Mutually exclusive with dangerouslySkipPermissions.",
+      },
+      dangerouslySkipPermissions: {
+        type: "boolean",
+        default: false,
+        description: "Adds --dangerously-skip-permissions, which disables ALL permission prompts (file writes, Bash, MCP tools, etc.). Mutually exclusive with permissionMode. Use this only when you really want to bypass every prompt; for the narrow case of allowing file writes only, use allowWrite=true.",
       },
       systemPrompt: {
         type: "string",
@@ -418,7 +424,8 @@ async function runTask(
   input: TaskInput,
   progressToken?: string | number,
 ): Promise<RunTaskResult> {
-  const validationError = validateSessionParams(input);
+  const validationError =
+    validateSessionParams(input) ?? validatePermissionParams(input);
   if (validationError) {
     return {
       success: false,
@@ -773,7 +780,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const progressToken = request.params._meta?.progressToken;
 
   log(`Prompt: ${input.prompt?.slice(0, 100)}...`);
-  log(`Model: ${input.model}, timeout: ${input.timeout}, allowWrite: ${input.allowWrite}`);
+  log(
+    `Model: ${input.model}, timeout: ${input.timeout}, allowWrite: ${input.allowWrite}, dangerouslySkipPermissions: ${input.dangerouslySkipPermissions}`,
+  );
 
   if (!input.prompt) {
     return {

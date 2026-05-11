@@ -84,7 +84,7 @@ describe("Session lifecycle (end-to-end via MCP stdio)", () => {
             model: "haiku",
             persistSession: true,
             maxBudgetUsd: 0.05,
-            allowWrite: true,
+            dangerouslySkipPermissions: true,
           },
         });
         const parsed1 = parseTaskResult(first);
@@ -101,7 +101,7 @@ describe("Session lifecycle (end-to-end via MCP stdio)", () => {
             model: "haiku",
             resume: sessionId,
             maxBudgetUsd: 0.05,
-            allowWrite: true,
+            dangerouslySkipPermissions: true,
           },
         });
         const parsed2 = parseTaskResult(second);

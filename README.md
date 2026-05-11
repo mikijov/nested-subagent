@@ -140,8 +140,9 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | `prompt` | string | **Required.** The task for the agent |
 | `model` | string | `sonnet` (default), `opus`, or `haiku` |
 | `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget. Omit to use claude's default |
-| `allowWrite` | boolean | Enable write permissions |
-| `permissionMode` | string | `acceptEdits` / `auto` / `bypassPermissions` / `default` / `dontAsk` / `plan`. Default `auto`. Ignored when `allowWrite` is true |
+| `allowWrite` | boolean | Default `false`. Narrow gate on file-modifying tools: when false, `Write`/`Edit`/`NotebookEdit` are appended to `--disallowed-tools` and the subagent is told it is in read-only-files mode. Bash is **not** blocked — shell-based writes (`sed -i`, redirects, `tee`) remain possible |
+| `permissionMode` | string | `acceptEdits` / `auto` / `bypassPermissions` / `default` / `dontAsk` / `plan`. Default `auto`. Mutually exclusive with `dangerouslySkipPermissions` |
+| `dangerouslySkipPermissions` | boolean | Adds `--dangerously-skip-permissions` — disables **all** permission prompts (file writes, Bash, MCP, etc.). Mutually exclusive with `permissionMode` |
 | `timeout` | number | Timeout in ms (default: 600000) |
 | `systemPrompt` | string | Custom system prompt |
 | `allowedTools` | string[] | Restrict to specific tools |

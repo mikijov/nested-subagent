@@ -188,8 +188,9 @@ The MCP server (`mcp-server/src/index.ts`) works by:
   effort?: "low" | "medium" | "high" | "xhigh" | "max",  // Default: "xhigh"
   workingDir?: string,
   timeout?: number,            // Default: 600000 (10 min)
-  allowWrite?: boolean,        // --dangerously-skip-permissions
-  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan",
+  allowWrite?: boolean,        // Gate on Write/Edit/NotebookEdit; default false adds them to --disallowed-tools + read-only-files system prompt note
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan",  // mutex with dangerouslySkipPermissions
+  dangerouslySkipPermissions?: boolean,  // --dangerously-skip-permissions (bypass ALL prompts)
   systemPrompt?: string,       // --system-prompt
   appendSystemPrompt?: string, // --append-system-prompt
   allowedTools?: string[],     // --allowed-tools
