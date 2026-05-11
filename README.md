@@ -120,6 +120,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | **Budget limits** | ❌ | ✅ maxBudgetUsd | ✅ Implemented |
 | **Extended thinking budget** | ❌ | ✅ effort low/medium/high/xhigh/max | ✅ Implemented |
 | **Resume support** | ✅ --resume | ✅ resume / continue / sessionId / fork | ✅ Implemented |
+| **Fallback model** | ✅ --fallback-model | ❌ Not exposed | **By design** — see [ARCHITECTURE.md](./ARCHITECTURE.md#no-fallback-model) |
 | **Background execution** | ✅ run_in_background | ❌ | 🔲 Planned |
 | **Normalized messages** | ✅ Full tree | JSON envelope (summary + final text) | 🔲 Full tree planned |
 | **Sidechain logging** | ✅ .claude/logs | ❌ | 🔲 Planned |

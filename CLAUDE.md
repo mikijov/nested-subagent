@@ -97,6 +97,7 @@ Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications
 - Timeout: `SIGTERM`, then `SIGKILL` 5s later. All active entries are torn down on `SIGTERM`/`SIGINT` to the server itself.
 - Debug log: `<os.tmpdir()>/nested-subagent-debug.log`, created with mode `0600` so prompts and stderr don't leak to other local users. Overwritten on each server start.
 - Persistent sessions accumulate under `~/.claude/sessions/`. The plugin does not clean them up.
+- **No `--fallback-model` by design.** The plugin deliberately omits `--fallback-model` and exposes no `fallbackModel` parameter. With defaults `model: opus, effort: xhigh`, a silent fallback to Sonnet on overload would degrade quality undetectably — the `result` event's `usage` block doesn't echo which model actually ran, so the parent agent can't tell that degradation happened. Anthropic provider-side overloads surface as `errorKind: "exit_nonzero"` after the CLI's internal retry/backoff loop; the caller decides whether to retry later. Note: this addresses provider overload (e.g. HTTP 529), not account quota / rate-limit errors. See `ARCHITECTURE.md` → *No fallback model* before adding fallback logic.
 
 ## Tool parameters
 

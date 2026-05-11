@@ -12,7 +12,8 @@
 4. [Plugin Architecture](#plugin-architecture)
 5. [MCP Server Implementation](#mcp-server-implementation)
 6. [Comparison Matrix](#comparison-matrix)
-7. [Key Architectural Insight](#key-architectural-insight)
+7. [Design Decisions](#design-decisions)
+8. [Key Architectural Insight](#key-architectural-insight)
 
 ---
 
@@ -281,6 +282,25 @@ function log(message: string) {
 4. **Full system prompt control** - Custom or appended prompts
 5. **Budget limits per subtask** - Prevent runaway costs
 6. **Parallel execution** - Multiple subtasks can run concurrently
+
+---
+
+## Design Decisions
+
+### No fallback model
+
+The plugin does not pass `--fallback-model` to the spawned `claude -p` and exposes no `fallbackModel` parameter. Anthropic provider-side overloads surface as task failures (`ok: false`, `errorKind: "exit_nonzero"`) after the CLI's own bounded retry/backoff loop completes.
+
+**Why.** The defaults are `model: opus`, `effort: xhigh`. A silent fallback to a smaller model on overload would degrade quality mid-run, and the `result` event's `usage` block does not echo which model actually executed — so the parent agent has no way to detect that degradation happened. For a workflow that exists *because* you want full Opus reasoning at every level of nesting, swapping in Sonnet would defeat the point.
+
+**Implications.**
+
+- Deep nested runs amplify overload risk. Each level is an independent spawn with its own retry budget; a mid-run overload kills that branch's work even though the parent retains context and can retry.
+- Failures are not instantaneous — the CLI does retry-with-backoff first, so callers see latency before the failure.
+- `maxBudgetUsd` stays meaningful. A fallback to Sonnet would stretch the budget at lower quality, weakening that contract.
+- The distinction worth being precise about: this is *not* "wait for your account quota". It is "wait for Anthropic's Opus capacity to come back". Account quota / rate-limit errors fail either way; `--fallback-model` only addresses provider-side overload (e.g. HTTP 529).
+
+**If this ever changes.** Add `fallbackModel` as an opt-in parameter with no default. Do not bake a fallback into `buildClaudeArgs`.
 
 ---
 
