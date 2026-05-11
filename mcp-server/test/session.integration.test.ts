@@ -35,8 +35,19 @@ function getResultText(result: unknown): string {
     .join("\n");
 }
 
-function parseSessionId(text: string): string | undefined {
-  return text.match(/session_id:\s*(\S+)/)?.[1];
+interface TaskJson {
+  ok: boolean;
+  taskId: string;
+  sessionId?: string;
+  persisted?: boolean;
+  result?: string;
+  error?: string;
+  errorKind?: string;
+}
+
+function parseTaskResult(result: unknown): TaskJson {
+  const text = getResultText(result);
+  return JSON.parse(text) as TaskJson;
 }
 
 async function makeClient(): Promise<{
@@ -76,10 +87,11 @@ describe("Session lifecycle (end-to-end via MCP stdio)", () => {
             allowWrite: true,
           },
         });
-        const text1 = getResultText(first);
-        expect(text1).toMatch(/persisted:\s*true/);
-        const sessionId = parseSessionId(text1);
-        expect(sessionId, `expected session_id in:\n${text1}`).toBeTruthy();
+        const parsed1 = parseTaskResult(first);
+        expect(parsed1.ok, `expected ok=true, got: ${JSON.stringify(parsed1)}`).toBe(true);
+        expect(parsed1.persisted).toBe(true);
+        const sessionId = parsed1.sessionId;
+        expect(sessionId, `expected sessionId in: ${JSON.stringify(parsed1)}`).toBeTruthy();
 
         const second = await client.callTool({
           name: "Task",
@@ -92,11 +104,11 @@ describe("Session lifecycle (end-to-end via MCP stdio)", () => {
             allowWrite: true,
           },
         });
-        const text2 = getResultText(second);
+        const parsed2 = parseTaskResult(second);
         // The agent should remember the prior context.
-        expect(text2.toUpperCase()).toContain("ALPHA");
+        expect(parsed2.result?.toUpperCase()).toContain("ALPHA");
         // The resumed run reports the same session ID.
-        expect(parseSessionId(text2)).toBe(sessionId);
+        expect(parsed2.sessionId).toBe(sessionId);
       } finally {
         await transport.close();
       }

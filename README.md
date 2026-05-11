@@ -121,7 +121,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | **Extended thinking budget** | ❌ | ✅ effort low/medium/high/xhigh/max | ✅ Implemented |
 | **Resume support** | ✅ --resume | ✅ resume / continue / sessionId / fork | ✅ Implemented |
 | **Background execution** | ✅ run_in_background | ❌ | 🔲 Planned |
-| **Normalized messages** | ✅ Full tree | Text only | 🔲 Planned |
+| **Normalized messages** | ✅ Full tree | JSON envelope (summary + final text) | 🔲 Full tree planned |
 | **Sidechain logging** | ✅ .claude/logs | ❌ | 🔲 Planned |
 | **Task aggregation** | N/A | ❌ | 🔲 Planned |
 
@@ -138,9 +138,8 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `prompt` | string | **Required.** The task for the agent |
-| `description` | string | Short summary for UI display (3-5 words) |
-| `model` | string | `sonnet`, `opus`, or `haiku` (default: opus) |
-| `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget (default: xhigh) |
+| `model` | string | `sonnet` (default), `opus`, or `haiku` |
+| `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget. Omit to use claude's default |
 | `allowWrite` | boolean | Enable write permissions |
 | `permissionMode` | string | `acceptEdits` / `auto` / `bypassPermissions` / `default` / `dontAsk` / `plan`. Default `auto`. Ignored when `allowWrite` is true |
 | `timeout` | number | Timeout in ms (default: 600000) |
@@ -153,15 +152,38 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | `forkSession` | boolean | When resuming, create a new session ID (`--fork-session`). Requires `resume` or `continueRecent` |
 | `persistSession` | boolean | Default `false`. When `true` (or implied by any resume param), the session is saved and can be resumed later |
 | `taskId` | string | Optional handle for `AbortTask`. If omitted, auto-generated and reported in the first progress notification |
+| `includeToolOutputs` | boolean | Default `false`. When `true`, the response payload's `toolOutputs` array carries each tool's raw stdout (truncated to 8 KB per entry). Default omits these to keep the calling agent's context small |
 
-The result text ends with a trailer that callers can parse:
+The tool returns a JSON object — same payload in `content[0].text` (compact) and `structuredContent` (parsed). The shape is declared via `outputSchema` on the tool.
 
+**Success:**
+
+```json
+{
+  "ok": true,
+  "taskId": "task-…",
+  "sessionId": "…uuid…",
+  "persisted": false,
+  "result": "<subagent's final text>",
+  "stats": { "toolUseCount": 5, "durationMs": 45000, "tokens": 12400, "cacheReadTokens": 3200, "costUsd": 0.018 },
+  "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }]
+}
 ```
-Done (N tool uses · Xk tokens · Ys)
-task_id: <id>
-session_id: <uuid>
-persisted: true|false
+
+**Failure:**
+
+```json
+{
+  "ok": false,
+  "taskId": "task-…",
+  "sessionId": "…",
+  "persisted": false,
+  "error": "Task timed out after 600000ms",
+  "errorKind": "timeout"
+}
 ```
+
+`errorKind` ∈ `timeout | spawn_failed | validation | exit_nonzero | aborted`.
 
 ### `mcp__plugin_nested-subagent_nested__AbortTask`
 
@@ -191,9 +213,9 @@ Intended for out-of-band orchestration: a separate MCP client (or a parallel too
     "model": "haiku"
   }
 }
-// Result text ends with: session_id: <uuid>
+// Response JSON contains: { "ok": true, "sessionId": "<uuid>", ... }
 
-// Call 2 — resume with the captured session_id
+// Call 2 — resume with the captured sessionId
 {
   "name": "Task",
   "arguments": {

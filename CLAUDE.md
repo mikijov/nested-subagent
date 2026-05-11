@@ -105,9 +105,8 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 | Parameter            | Type     | Notes                                                                |
 |----------------------|----------|----------------------------------------------------------------------|
 | `prompt`             | string   | Required.                                                            |
-| `description`        | string   | 3–5 word UI summary.                                                 |
-| `model`              | enum     | `sonnet` \| `opus` (default) \| `haiku`.                             |
-| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` (default) \| `max`. Maps to `--effort` (extended thinking budget). |
+| `model`              | enum     | `sonnet` (default) \| `opus` \| `haiku`.                             |
+| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Maps to `--effort` (extended thinking budget). Omit to use claude's default. |
 | `workingDir`         | string   | Defaults to `process.cwd()`.                                         |
 | `timeout`            | number   | Milliseconds. Default `600000` (10 min).                             |
 | `allowWrite`         | boolean  | Adds `--dangerously-skip-permissions` (mutually exclusive w/ below). |
@@ -124,15 +123,40 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 | `forkSession`        | boolean  | `--fork-session` — when resuming, create a new session ID. Requires `resume` or `continueRecent`. |
 | `persistSession`     | boolean  | Default `false` (appends `--no-session-persistence`). Any of `resume`/`continueRecent`/`sessionId`/`forkSession` implies `true`; explicit `false` alongside them is rejected. |
 | `taskId`             | string   | Caller-supplied handle for `AbortTask`. Auto-generated if omitted and emitted in the first progress notification (`taskId=…`). |
+| `includeToolOutputs` | boolean  | Default `false`. When `true`, the response payload includes a `toolOutputs` array with raw stdout from each tool the subagent ran (each entry truncated to 8 KB). Default omits these to keep the parent's context small. |
 
-The result text ends with a metadata trailer the caller can parse:
+The response is a JSON object returned both as `content[0].text` (compact `JSON.stringify`) and mirrored into `structuredContent`. Schema is declared on the tool via `outputSchema`. Shape:
 
+```jsonc
+// success
+{
+  "ok": true,
+  "taskId": "task-…",
+  "sessionId": "…uuid…",
+  "persisted": false,
+  "result": "<subagent final text>",
+  "stats": {
+    "toolUseCount": 5,
+    "durationMs": 45000,
+    "tokens": 12400,
+    "cacheReadTokens": 3200,
+    "costUsd": 0.018
+  },
+  "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }]
+}
+
+// failure
+{
+  "ok": false,
+  "taskId": "task-…",
+  "sessionId": "…",      // present when the system event fired before the failure
+  "persisted": false,
+  "error": "Task timed out after 600000ms",
+  "errorKind": "timeout" // one of: timeout | spawn_failed | validation | exit_nonzero | aborted
+}
 ```
-Done (N tool uses · Xk tokens · Ys)
-task_id: <id>
-session_id: <uuid>
-persisted: true|false
-```
+
+`tokens` = standard-rate billable (`input + output + cache_creation`). `cacheReadTokens` is tracked separately because cache reads are billed at a reduced rate. `toolUseSummary` is always included on success; raw `toolOutputs` only when the caller passes `includeToolOutputs: true`.
 
 ### `mcp__plugin_nested-subagent_nested__AbortTask`
 

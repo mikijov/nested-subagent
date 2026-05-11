@@ -38,6 +38,7 @@ import { appendFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   type ActiveTaskEntry,
+  type ErrorKind,
   type TaskInput,
   buildClaudeArgs,
   computeEffectivePersist,
@@ -101,26 +102,23 @@ interface StreamMessage {
 // Tool definition - named "Task" to match native Task tool UX
 const NESTED_TASK_TOOL: Tool = {
   name: "Task",
-  description: `Launch a new agent that has access to all tools including Task. When you are searching for a keyword or file and are not confident that you will find the right match on the first try, use the Agent tool to perform the search for you. For example:
+  description: `Spawn an isolated Claude subagent in a fresh process with its own 200k-token context, full tool access (Bash, Read, Edit, Web, MCP — including this Task tool itself, so nesting works to any depth), and an independent permission scope.
 
-- If you are searching for a keyword like "config" or "logger", the Agent tool is appropriate
-- If you want to read a specific file path, use the Read or Glob tool instead of the Agent tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the Glob tool instead, to find the match more quickly
+When to use:
+- Multi-step delegation that would otherwise inflate your context with intermediate tool outputs.
+- Parallel research: launch several Task calls in one message (single message, multiple tool_uses) and they run concurrently.
+- Long-running or token-heavy work whose final answer is small (the subagent absorbs the bulk; you get a structured summary).
 
-Usage notes:
-1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
-2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.
-3. By default each invocation runs in a fresh, isolated session (ephemeral). To chain calls against the same underlying Claude session, pass \`persistSession: true\` (or any of \`resume\`/\`continueRecent\`/\`sessionId\`) — the result text reports the \`session_id\` so the next call can pass \`resume: "<id>"\`. Without those params the invocation remains stateless and your prompt must be self-contained.
-4. The agent's outputs should generally be trusted
-5. IMPORTANT: The spawned agent runs as a fresh process with its own 200k context window and CAN use the Task tool.
-6. A running task can be aborted out-of-band via the sibling \`AbortTask\` tool. Pass an explicit \`taskId\` here if you intend to abort; otherwise the auto-generated id appears in the first progress notification.`,
+Output: JSON conforming to outputSchema. Key fields: \`ok\` (boolean discriminator), \`result\` (subagent's final text on success), \`error\` + \`errorKind\` on failure, \`taskId\`, \`sessionId\`, \`persisted\`, \`stats\`, \`toolUseSummary\`. Raw tool stdout is omitted unless you pass \`includeToolOutputs: true\`.
+
+Session chaining: pass \`persistSession: true\` (or \`resume\`/\`continueRecent\`/\`sessionId\`), read \`sessionId\` from the response, then pass \`resume: "<id>"\` on the next call.
+
+Abort: pass an explicit \`taskId\` (or read the auto-generated one from the first progress notification) and call the sibling \`AbortTask\` tool.
+
+Defaults: model=opus, effort=xhigh, permissionMode=auto, persistSession=false, timeout=600000ms.`,
   inputSchema: {
     type: "object" as const,
     properties: {
-      description: {
-        type: "string",
-        description: "A short (3-5 word) description of the task",
-      },
       prompt: {
         type: "string",
         description: "The task for the agent to perform",
@@ -214,8 +212,102 @@ Usage notes:
         description:
           "Optional handle for out-of-band abort via the AbortTask tool. If omitted, an id is auto-generated and emitted in the first progress notification.",
       },
+      includeToolOutputs: {
+        type: "boolean",
+        default: false,
+        description:
+          "If true, append raw stdout from each tool the subagent used to the response under `toolOutputs`. Default false — the parent receives only `toolUseSummary` counts, so the subagent absorbs bulk tokens. Each output is truncated to 8 KB.",
+      },
     },
     required: ["prompt"],
+  },
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      ok: {
+        type: "boolean",
+        description: "True on successful subagent completion.",
+      },
+      taskId: {
+        type: "string",
+        description: "Handle for AbortTask. Always present.",
+      },
+      sessionId: {
+        type: "string",
+        description:
+          "Claude session UUID. Present whenever the system event fired (almost always, even on most failures).",
+      },
+      persisted: {
+        type: "boolean",
+        description:
+          "Whether the session was written to disk and can be resumed via `resume: <sessionId>` on a follow-up call.",
+      },
+      result: {
+        type: "string",
+        description:
+          "Subagent's final assistant message. Present iff ok=true.",
+      },
+      error: {
+        type: "string",
+        description: "Human-readable failure reason. Present iff ok=false.",
+      },
+      errorKind: {
+        type: "string",
+        enum: [
+          "timeout",
+          "spawn_failed",
+          "validation",
+          "exit_nonzero",
+          "aborted",
+        ],
+        description: "Programmatic failure category. Present iff ok=false.",
+      },
+      stats: {
+        type: "object",
+        properties: {
+          toolUseCount: { type: "integer" },
+          durationMs: { type: "integer" },
+          tokens: {
+            type: "integer",
+            description:
+              "input + output + cache_creation (billed at standard rate).",
+          },
+          cacheReadTokens: {
+            type: "integer",
+            description:
+              "Tokens read from cache, billed separately at a reduced rate.",
+          },
+          costUsd: { type: "number" },
+        },
+      },
+      toolUseSummary: {
+        type: "array",
+        description:
+          "Counts of each tool the subagent invoked. Cheap to include; gives the parent visibility into what happened without dumping outputs.",
+        items: {
+          type: "object",
+          properties: {
+            tool: { type: "string" },
+            count: { type: "integer" },
+          },
+          required: ["tool", "count"],
+        },
+      },
+      toolOutputs: {
+        type: "array",
+        description:
+          "Raw stdout per tool invocation. Present only when the caller passed `includeToolOutputs: true`. Each output truncated to 8 KB.",
+        items: {
+          type: "object",
+          properties: {
+            tool: { type: "string" },
+            output: { type: "string" },
+          },
+          required: ["tool", "output"],
+        },
+      },
+    },
+    required: ["ok", "taskId"],
   },
 };
 
@@ -260,13 +352,24 @@ interface ProgressState {
   currentToolUse: string | null;
   startTime: number;
   toolOutputs: ToolOutput[];
+  toolUseCounts: Map<string, number>;
+}
+
+const TOOL_OUTPUT_MAX_BYTES = 8 * 1024;
+
+function truncateToolOutput(output: string): string {
+  const buf = Buffer.from(output, "utf8");
+  if (buf.length <= TOOL_OUTPUT_MAX_BYTES) return output;
+  const head = buf.subarray(0, TOOL_OUTPUT_MAX_BYTES).toString("utf8");
+  const dropped = buf.length - TOOL_OUTPUT_MAX_BYTES;
+  return `${head}…[truncated ${dropped} bytes]`;
 }
 
 // Create MCP server
 const server = new Server(
   {
     name: "nested-subagent",
-    version: "2.0.0",
+    version: "3.0.0",
   },
   {
     capabilities: {
@@ -281,33 +384,18 @@ const server = new Server(
 // real ChildProcess is attached and kills immediately if so.
 const activeProcesses = new Map<string, ActiveTaskEntry>();
 
-/**
- * Helper to format numbers with K/M suffixes
- */
-function formatNumber(num: number): string {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
-  return num.toString();
-}
-
-/**
- * Helper to format duration
- */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(0)}s`;
-}
-
 interface RunTaskResult {
   success: boolean;
   result?: string;
   error?: string;
-  usage?: object;
+  errorKind?: ErrorKind;
   toolUseCount?: number;
   duration?: number;
   tokens?: number;
   cacheReadTokens?: number;
+  costUsd?: number;
   toolOutputs?: ToolOutput[];
+  toolUseSummary?: Array<{ tool: string; count: number }>;
   sessionId?: string;
   persisted?: boolean;
   taskId?: string;
@@ -326,12 +414,15 @@ async function runTask(
 ): Promise<RunTaskResult> {
   const validationError = validateSessionParams(input);
   if (validationError) {
-    return { success: false, error: validationError };
+    return {
+      success: false,
+      error: validationError,
+      errorKind: "validation",
+    };
   }
 
   const workingDir = input.workingDir ?? process.cwd();
   const timeout = input.timeout ?? 600000;
-  const description = input.description;
   const persisted = computeEffectivePersist(input);
 
   const taskId = input.taskId ?? generateTaskId();
@@ -339,6 +430,8 @@ async function runTask(
     return {
       success: false,
       error: `taskId collision: ${taskId} is already active`,
+      errorKind: "validation",
+      taskId,
     };
   }
 
@@ -351,6 +444,7 @@ async function runTask(
     currentToolUse: null,
     startTime: Date.now(),
     toolOutputs: [],
+    toolUseCounts: new Map<string, number>(),
   };
 
   // Reserve the entry synchronously so AbortTask calls that arrive during
@@ -358,13 +452,12 @@ async function runTask(
   activeProcesses.set(taskId, { proc: null, abortRequested: false });
 
   if (progressToken !== undefined) {
-    const label = description ? `Task: ${description}` : "Task";
     server.notification({
       method: "notifications/progress",
       params: {
         progressToken,
         progress: 0,
-        message: `${label} · taskId=${taskId}`,
+        message: `Task · taskId=${taskId}`,
       },
     });
   }
@@ -443,6 +536,10 @@ async function runTask(
                 if (block.type === "tool_use" && block.name) {
                   state.toolUseCount++;
                   state.currentToolUse = block.name;
+                  state.toolUseCounts.set(
+                    block.name,
+                    (state.toolUseCounts.get(block.name) ?? 0) + 1,
+                  );
 
                   if (progressToken !== undefined) {
                     server.notification({
@@ -519,22 +616,29 @@ async function runTask(
       proc.stderr.once("error", () => resolveDrain());
     });
 
-    proc.on("close", async (code: number | null) => {
+    proc.on("close", async (code: number | null, signal: NodeJS.Signals | null) => {
       await stderrDrained;
-      log(`[${taskId}] Process closed with code: ${code}`);
+      log(`[${taskId}] Process closed with code: ${code}, signal: ${signal}`);
       clearTimeout(timeoutId);
       activeProcesses.delete(taskId);
       const duration = Date.now() - state.startTime;
       log(`[${taskId}] Duration: ${duration}ms, timedOut: ${timedOut}, hasResult: ${!!lastResult}`);
+
+      const toolUseSummary = Array.from(state.toolUseCounts.entries())
+        .map(([tool, count]) => ({ tool, count }));
 
       if (timedOut) {
         log(`[${taskId}] Resolving with timeout error`);
         resolve({
           success: false,
           error: `Task timed out after ${timeout}ms`,
+          errorKind: "timeout",
           taskId,
           sessionId: capturedSessionId,
           persisted,
+          toolUseCount: state.toolUseCount,
+          duration,
+          toolUseSummary,
         });
         return;
       }
@@ -564,12 +668,14 @@ async function runTask(
         resolve({
           success: !lastResult.is_error,
           result: lastResult.result,
-          usage: lastResult.usage,
+          errorKind: lastResult.is_error ? "exit_nonzero" : undefined,
           toolUseCount: state.toolUseCount,
           duration,
           tokens: totalTokens,
           cacheReadTokens,
+          costUsd: lastResult.total_cost_usd,
           toolOutputs: state.toolOutputs,
+          toolUseSummary,
           sessionId: capturedSessionId,
           persisted,
           taskId,
@@ -582,16 +688,26 @@ async function runTask(
           duration,
           tokens: 0,
           toolOutputs: state.toolOutputs,
+          toolUseSummary,
           sessionId: capturedSessionId,
           persisted,
           taskId,
         });
       } else {
+        // Externally killed (e.g. AbortTask SIGTERM/SIGKILL) versus a child
+        // that exited non-zero on its own. `timedOut` is already handled above.
+        const aborted = signal !== null;
         resolve({
           success: false,
-          error: stderr.trim() || `Process exited with code ${code}`,
+          error: aborted
+            ? `Aborted by signal ${signal}`
+            : stderr.trim() || `Process exited with code ${code}`,
+          errorKind: aborted ? "aborted" : "exit_nonzero",
           sessionId: capturedSessionId,
           persisted,
+          toolUseCount: state.toolUseCount,
+          duration,
+          toolUseSummary,
           taskId,
         });
       }
@@ -603,6 +719,7 @@ async function runTask(
       resolve({
         success: false,
         error: `Failed to spawn: ${err.message}`,
+        errorKind: "spawn_failed",
         taskId,
       });
     });
@@ -662,63 +779,76 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const result = await runTask(input, progressToken);
   log(`Result: success=${result.success}, error=${result.error}`);
 
-  // Session metadata trailer — always appended when the system event yielded
-  // a session_id (which it does for every spawn). Callers parse the two
-  // labeled lines below to chain or correlate logs.
-  const metadataLines: string[] = [];
-  if (result.taskId) metadataLines.push(`task_id: ${result.taskId}`);
-  if (result.sessionId) metadataLines.push(`session_id: ${result.sessionId}`);
-  if (result.persisted !== undefined) {
-    metadataLines.push(`persisted: ${result.persisted}`);
+  const payload = buildTaskPayload(result, Boolean(input.includeToolOutputs));
+  const text = JSON.stringify(payload);
+
+  return {
+    content: [{ type: "text", text }],
+    structuredContent: payload,
+    ...(payload.ok ? {} : { isError: true }),
+  };
+});
+
+interface TaskStats {
+  toolUseCount?: number;
+  durationMs?: number;
+  tokens?: number;
+  cacheReadTokens?: number;
+  costUsd?: number;
+}
+
+interface TaskPayload {
+  ok: boolean;
+  taskId: string;
+  sessionId?: string;
+  persisted?: boolean;
+  result?: string;
+  error?: string;
+  errorKind?: ErrorKind;
+  stats?: TaskStats;
+  toolUseSummary?: Array<{ tool: string; count: number }>;
+  toolOutputs?: Array<{ tool: string; output: string }>;
+}
+
+function buildTaskPayload(
+  result: RunTaskResult,
+  includeToolOutputs: boolean,
+): TaskPayload {
+  const stats: TaskStats = {};
+  if (result.toolUseCount !== undefined) stats.toolUseCount = result.toolUseCount;
+  if (result.duration !== undefined) stats.durationMs = result.duration;
+  if (result.tokens !== undefined) stats.tokens = result.tokens;
+  if (result.cacheReadTokens !== undefined) {
+    stats.cacheReadTokens = result.cacheReadTokens;
   }
-  const metadataTrailer = metadataLines.length > 0
-    ? `\n${metadataLines.join("\n")}`
-    : "";
+  if (result.costUsd !== undefined) stats.costUsd = result.costUsd;
+
+  const payload: TaskPayload = {
+    ok: result.success,
+    taskId: result.taskId ?? "",
+  };
+  if (result.sessionId !== undefined) payload.sessionId = result.sessionId;
+  if (result.persisted !== undefined) payload.persisted = result.persisted;
+  if (Object.keys(stats).length > 0) payload.stats = stats;
+  if (result.toolUseSummary && result.toolUseSummary.length > 0) {
+    payload.toolUseSummary = result.toolUseSummary;
+  }
 
   if (result.success) {
-    // Format output to match native Task tool: "Done (X tool uses · Yk tokens · Zs)"
-    const toolUseText = result.toolUseCount === 1 ? '1 tool use' : `${result.toolUseCount ?? 0} tool uses`;
-    const tokensText = formatNumber(result.tokens ?? 0) + ' tokens';
-    const cacheText = (result.cacheReadTokens ?? 0) > 0
-      ? ` · ${formatNumber(result.cacheReadTokens ?? 0)} cached`
-      : '';
-    const durationText = formatDuration(result.duration ?? 0);
-    const summary = `Done (${toolUseText} · ${tokensText}${cacheText} · ${durationText})${metadataTrailer}`;
-
-    // Format tool outputs for display (similar to native Task tool)
-    let toolOutputsText = '';
-    if (result.toolOutputs && result.toolOutputs.length > 0) {
-      toolOutputsText = result.toolOutputs
-        .map(to => `[${to.tool}]\n${to.output}`)
-        .join('\n\n');
+    if (result.result !== undefined) payload.result = result.result;
+    if (includeToolOutputs && result.toolOutputs && result.toolOutputs.length > 0) {
+      payload.toolOutputs = result.toolOutputs.map((to) => ({
+        tool: to.tool,
+        output: truncateToolOutput(to.output),
+      }));
     }
-
-    // Build final output: tool outputs + result + summary
-    const parts: string[] = [];
-    if (toolOutputsText) parts.push(toolOutputsText);
-    if (result.result) parts.push(result.result);
-    parts.push(summary);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: parts.join('\n\n'),
-        },
-      ],
-    };
   } else {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Error: ${result.error}${metadataTrailer}`,
-        },
-      ],
-      isError: true,
-    };
+    if (result.error !== undefined) payload.error = result.error;
+    if (result.errorKind !== undefined) payload.errorKind = result.errorKind;
   }
-});
+
+  return payload;
+}
 
 // Graceful shutdown - abort all active processes
 process.on("SIGTERM", () => {

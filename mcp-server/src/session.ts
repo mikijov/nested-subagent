@@ -6,7 +6,6 @@
  */
 
 export interface TaskInput {
-  description?: string;
   prompt: string;
   model?: "sonnet" | "opus" | "haiku";
   workingDir?: string;
@@ -34,7 +33,16 @@ export interface TaskInput {
   persistSession?: boolean;
   // Out-of-band abort handle
   taskId?: string;
+  // Response shape
+  includeToolOutputs?: boolean;
 }
+
+export type ErrorKind =
+  | "timeout"
+  | "spawn_failed"
+  | "validation"
+  | "exit_nonzero"
+  | "aborted";
 
 export interface AbortableProc {
   kill(signal?: NodeJS.Signals | number): boolean;
