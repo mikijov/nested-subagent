@@ -1,7 +1,7 @@
 {
   "name": "nested-subagent",
   "owner": {
-    "name": "gruckion"
+    "name": "mikijov"
   },
   "description": "Unlimited nested subagents with full tool access",
   "plugins": [

@@ -4,9 +4,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-v1.0.33+-blue.svg)](https://docs.anthropic.com/en/docs/claude-code)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/gruckion/nested-subagent/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/mikijov/nested-subagent/pulls)
 
 Enable **unlimited nested subagents** in Claude Code. Subagents can spawn their own subagents.
+
+_Forked from [gruckion/nested-subagent](https://github.com/gruckion/nested-subagent) — original work © CloudAI-X._
 
 ---
 
@@ -30,13 +32,13 @@ Marketplace installs only need `claude` and `node` — the bundled `dist/index.m
 1. Run `/plugin` in Claude Code
 2. Go to **Marketplaces** tab
 3. Select **+ Add Marketplace**
-4. Enter `gruckion/nested-subagent`
+4. Enter `mikijov/nested-subagent`
 5. Go to **Discover** tab and install the plugin
 
 ### Option 2: Install Locally
 
 ```bash
-git clone https://github.com/gruckion/nested-subagent.git
+git clone https://github.com/mikijov/nested-subagent.git
 cd nested-subagent/mcp-server && npm install
 claude /plugin install ./nested-subagent
 ```

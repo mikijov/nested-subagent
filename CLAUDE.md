@@ -50,7 +50,7 @@ Integration tests pin to `model: "haiku"` with low `maxTurns` to bound cost; the
 ```bash
 claude --plugin-dir /path/to/nested-subagent   # Per-session
 claude /plugin install ./nested-subagent       # Local install
-# Or add marketplace `gruckion/nested-subagent` via the /plugin UI
+# Or add marketplace `mikijov/nested-subagent` via the /plugin UI
 ```
 
 The marketplace entry points at `mcp-server/dist/index.mjs`, so `npm run build` is required before installs pick up code changes.

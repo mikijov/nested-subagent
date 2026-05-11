@@ -42,7 +42,7 @@ an individual is officially representing the community in public spaces.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-[GitHub Issues](https://github.com/gruckion/nested-subagent/issues).
+[GitHub Issues](https://github.com/mikijov/nested-subagent/issues).
 
 All complaints will be reviewed and investigated promptly and fairly.
 
