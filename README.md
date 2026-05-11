@@ -52,6 +52,7 @@ claude --plugin-dir /path/to/nested-subagent
 | Component | Name | Description |
 |-----------|------|-------------|
 | MCP Tool | `Task` | Spawns isolated Claude processes with full tool access |
+| MCP Tool | `AbortTask` | Cancels a running `Task` out-of-band by `taskId` |
 
 ## Example
 
@@ -111,13 +112,13 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | **Tool use counting** | ✅ | ✅ | ✅ Implemented |
 | **Token tracking** | ✅ | ✅ | ✅ Implemented |
 | **Cost tracking** | ✅ | ✅ | ✅ Implemented |
-| **Abort / cancel** | AbortController | SIGTERM / SIGKILL | ✅ Implemented |
+| **Abort / cancel** | AbortController | SIGTERM / SIGKILL + sibling `AbortTask` tool | ✅ Implemented |
 | **Configurable model** | ❌ | ✅ sonnet / opus / haiku | ✅ Implemented |
 | **Configurable timeout** | ❌ | ✅ | ✅ Implemented |
 | **System prompt control** | ❌ | ✅ Full control | ✅ Implemented |
 | **Tool restrictions** | ❌ | ✅ allowed / disallowed | ✅ Implemented |
 | **Budget limits** | ❌ | ✅ maxBudgetUsd | ✅ Implemented |
-| **Resume support** | ✅ --resume | ❌ | 🔲 Planned |
+| **Resume support** | ✅ --resume | ✅ resume / continue / sessionId / fork | ✅ Implemented |
 | **Background execution** | ✅ run_in_background | ❌ | 🔲 Planned |
 | **Normalized messages** | ✅ Full tree | Text only | 🔲 Planned |
 | **Sidechain logging** | ✅ .claude/logs | ❌ | 🔲 Planned |
@@ -131,7 +132,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 
 ## Tool Reference
 
-The `mcp__plugin_fallback-agent_fallback__Task` tool accepts:
+### `mcp__plugin_fallback-agent_fallback__Task`
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -143,6 +144,62 @@ The `mcp__plugin_fallback-agent_fallback__Task` tool accepts:
 | `systemPrompt` | string | Custom system prompt |
 | `allowedTools` | string[] | Restrict to specific tools |
 | `maxBudgetUsd` | number | Cost limit for the task |
+| `sessionId` | string | Specific session UUID (`--session-id`). Combined with `resume`/`continueRecent` requires `forkSession` |
+| `resume` | string | Resume an existing session by UUID (`--resume`). Implies `persistSession: true` |
+| `continueRecent` | boolean | Resume the most recent session in `workingDir` (`--continue`). Implies `persistSession: true` |
+| `forkSession` | boolean | When resuming, create a new session ID (`--fork-session`). Requires `resume` or `continueRecent` |
+| `persistSession` | boolean | Default `false`. When `true` (or implied by any resume param), the session is saved and can be resumed later |
+| `taskId` | string | Optional handle for `AbortTask`. If omitted, auto-generated and reported in the first progress notification |
+
+The result text ends with a trailer that callers can parse:
+
+```
+Done (N tool uses · Xk tokens · Ys)
+task_id: <id>
+session_id: <uuid>
+persisted: true|false
+```
+
+### `mcp__plugin_fallback-agent_fallback__AbortTask`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `taskId` | string | **Required.** The handle returned from `Task` (either supplied by the caller or emitted in the first progress notification as `taskId=…`) |
+| `signal` | string | `SIGTERM` (default), `SIGINT`, or `SIGKILL` |
+
+Returns one of:
+
+- `aborted` — signal delivered to a live child process
+- `pending` — task is mid-spawn; the abort is queued and will fire when the child attaches
+- `not_found` — no active task with that id
+- `already_exited` — task found but the child has already terminated
+
+Intended for out-of-band orchestration: a separate MCP client (or a parallel tool call) can cancel work without waiting for the original `Task` call to return.
+
+### Example: Resuming a session
+
+```jsonc
+// Call 1 — persist a fresh session
+{
+  "name": "Task",
+  "arguments": {
+    "prompt": "Remember the word ALPHA for later.",
+    "persistSession": true,
+    "model": "haiku"
+  }
+}
+// Result text ends with: session_id: <uuid>
+
+// Call 2 — resume with the captured session_id
+{
+  "name": "Task",
+  "arguments": {
+    "prompt": "What word did I ask you to remember?",
+    "resume": "<uuid from call 1>",
+    "model": "haiku"
+  }
+}
+```
 
 ## Architecture
 

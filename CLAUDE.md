@@ -66,9 +66,11 @@ Plugin:  Main → mcp Task → spawn `claude -p` → Fresh Main Agent → CAN Ta
 
 The recursion blocker in native Claude Code (`.filter(_ => _.name !== AgentTool.name)`) is process-local. A fresh `claude -p` process is a new main agent that the blocker never touches.
 
-### MCP server (`mcp-server/src/index.ts`)
+### MCP server (`mcp-server/src/index.ts` + `mcp-server/src/session.ts`)
 
-Single tool, named `Task` to mirror the native UX. The handler (`runTask`, ~line 240) builds CLI args and spawns:
+Two tools: `Task` (spawns a nested agent) and `AbortTask` (cancels a running one). `runTask` in `index.ts` orchestrates the spawn; the pure helpers it relies on live in `session.ts` so they can be unit-tested without booting the stdio server.
+
+The spawn command produced by `buildClaudeArgs`:
 
 ```
 claude -p <prompt> --output-format stream-json --verbose --model <model> \
@@ -76,23 +78,29 @@ claude -p <prompt> --output-format stream-json --verbose --model <model> \
   [--system-prompt …] [--append-system-prompt …] \
   [--allowed-tools …] [--disallowed-tools …] \
   [--max-budget-usd …] [--add-dir …] \
-  --no-session-persistence \
+  [--resume <id> | --continue] [--session-id <id>] [--fork-session] \
+  [--no-session-persistence] \
   [--plugin-dir $CLAUDE_PLUGIN_ROOT]   # only when env var is set
 ```
 
-Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications/progress` for each `system`/`assistant`/`user`/`result` event, capturing tool-use counts, token usage, and cost from the final `result` message.
+Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications/progress` for each `system`/`assistant`/`user`/`result` event, capturing tool-use counts, token usage, cost, and `session_id` from the events.
 
 **Things to know when editing this file:**
 
 - `proc.stdin?.end()` runs immediately after spawn — `claude -p` takes the prompt as a CLI arg, not via stdin, and the process hangs if stdin stays open.
-- The `--plugin-dir` propagation depends on `CLAUDE_PLUGIN_ROOT` being set in the env. Without it, the spawned process won't have this plugin's MCP server, and nesting beyond one level silently stops working.
-- `--no-session-persistence` is always passed so spawned tasks don't pollute session history.
-- Timeout: `SIGTERM`, then `SIGKILL` 5s later. All active PIDs are tracked in `activeProcesses` and torn down on `SIGTERM`/`SIGINT` to the server itself.
+- The `--plugin-dir` propagation depends on `CLAUDE_PLUGIN_ROOT` being set in the env. Without it, the spawned process won't have this plugin's MCP server, and nesting beyond one level silently stops working. **Resumed sessions still need `--plugin-dir`** — the propagation runs through the same code path.
+- `--no-session-persistence` is conditional. It's appended only when `persistSession` is unset/false AND none of `resume`/`continueRecent`/`sessionId`/`forkSession` are set. Setting `persistSession: false` together with any resume param is a hard error (CLI would reject it too).
+- Session lifecycle validation lives in `validateSessionParams` (`session.ts`). Rules: `resume`/`continueRecent` are mutually exclusive; `forkSession` requires one of them; `sessionId` + `resume`/`continueRecent` requires `forkSession` (CLI requirement).
+- `activeProcesses` is `Map<string, ActiveTaskEntry>`. Entries are registered with `proc: null` **before** `spawn()` returns so an `AbortTask` call that races the spawn can queue a signal; the spawn path delivers the queued signal once it attaches the real `ChildProcess`.
+- Timeout: `SIGTERM`, then `SIGKILL` 5s later. All active entries are torn down on `SIGTERM`/`SIGINT` to the server itself.
 - Debug log: `/tmp/fallback-agent-debug.log` (overwritten on each server start).
+- Persistent sessions accumulate under `~/.claude/sessions/`. The plugin does not clean them up.
 
 ## Tool parameters
 
-`mcp__plugin_fallback-agent_fallback__Task` — schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`).
+### `mcp__plugin_fallback-agent_fallback__Task`
+
+Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the shared `TaskInput` type and helpers are in `mcp-server/src/session.ts`.
 
 | Parameter            | Type     | Notes                                                                |
 |----------------------|----------|----------------------------------------------------------------------|
@@ -109,3 +117,27 @@ Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications
 | `disallowedTools`    | string[] | `--disallowed-tools`.                                                |
 | `maxBudgetUsd`       | number   | `--max-budget-usd`.                                                  |
 | `addDirs`            | string[] | `--add-dir`.                                                         |
+| `sessionId`          | string   | `--session-id <uuid>` — names a new session, or the forked session ID when combined with `resume`/`continueRecent` (requires `forkSession`). |
+| `resume`             | string   | `--resume <uuid>` — resume an existing session. Implies `persistSession: true`; mutually exclusive with `continueRecent`. |
+| `continueRecent`     | boolean  | `--continue` — resume the most recent session in `workingDir`. Implies `persistSession: true`; mutually exclusive with `resume`. |
+| `forkSession`        | boolean  | `--fork-session` — when resuming, create a new session ID. Requires `resume` or `continueRecent`. |
+| `persistSession`     | boolean  | Default `false` (appends `--no-session-persistence`). Any of `resume`/`continueRecent`/`sessionId`/`forkSession` implies `true`; explicit `false` alongside them is rejected. |
+| `taskId`             | string   | Caller-supplied handle for `AbortTask`. Auto-generated if omitted and emitted in the first progress notification (`taskId=…`). |
+
+The result text ends with a metadata trailer the caller can parse:
+
+```
+Done (N tool uses · Xk tokens · Ys)
+task_id: <id>
+session_id: <uuid>
+persisted: true|false
+```
+
+### `mcp__plugin_fallback-agent_fallback__AbortTask`
+
+| Parameter | Type   | Notes                                                                                          |
+|-----------|--------|------------------------------------------------------------------------------------------------|
+| `taskId`  | string | Required. The handle from `Task.taskId` (caller-supplied or auto-generated, in progress msg). |
+| `signal`  | enum   | `SIGTERM` (default) \| `SIGINT` \| `SIGKILL`.                                                 |
+
+Returns one of: `aborted` (signal delivered), `pending` (queued — proc not yet attached), `not_found` (no such taskId), `already_exited`.

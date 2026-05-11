@@ -175,6 +175,7 @@ The MCP server (`mcp-server/src/index.ts`) works by:
 ### Tool Parameters
 
 ```typescript
+// Task tool
 {
   // Optional UI description
   description?: string,        // Short task summary (3-5 words)
@@ -194,8 +195,32 @@ The MCP server (`mcp-server/src/index.ts`) works by:
   disallowedTools?: string[],  // --disallowed-tools
   maxBudgetUsd?: number,       // --max-budget-usd
   addDirs?: string[],          // --add-dir
+
+  // Session lifecycle
+  sessionId?: string,          // --session-id <uuid>
+  resume?: string,             // --resume <uuid>
+  continueRecent?: boolean,    // --continue
+  forkSession?: boolean,       // --fork-session (paired with resume/continueRecent)
+  persistSession?: boolean,    // default false; implied true by any resume param
+
+  // Out-of-band abort handle
+  taskId?: string,             // caller-supplied; otherwise auto-generated and emitted in progress
+}
+
+// AbortTask tool — sibling for out-of-band cancellation
+{
+  taskId: string,              // Required
+  signal?: "SIGTERM" | "SIGINT" | "SIGKILL",  // Default SIGTERM
 }
 ```
+
+The sibling `AbortTask` tool resolves the historical gap where running tasks had no externally addressable handle — `activeProcesses` was process-local. The `taskId` is registered synchronously **before** `spawn()`, so an `AbortTask` call that races the spawn returns `pending` and the queued signal is delivered the moment the child attaches.
+
+### Session Lifecycle
+
+Resumed sessions still spawn fresh `claude -p` processes — the bypass mechanism described above is unchanged. `--plugin-dir` propagation runs through the same code path, so a resumed session can still call this plugin's `Task` tool recursively.
+
+Persisted sessions accumulate under `~/.claude/sessions/`. The plugin does not clean them up; rely on Claude Code's own session cleanup.
 
 ### Critical Implementation Details
 
@@ -235,7 +260,8 @@ function log(message: string) {
 | **Permissions** | Inherited | Fully configurable |
 | **System prompt** | Default inherited | Fully customizable |
 | **Budget control** | None | Per-task limits |
-| **Abort mechanism** | `abortController` | SIGTERM/SIGKILL |
+| **Abort mechanism** | `abortController` | SIGTERM/SIGKILL + sibling `AbortTask` tool |
+| **Session lifecycle** | --resume only | resume / continue / sessionId / fork-session |
 
 ### Advantages of Nested-SubAgent Plugin
 

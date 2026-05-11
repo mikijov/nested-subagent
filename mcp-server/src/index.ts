@@ -32,10 +32,18 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { spawn, ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import { createInterface } from "readline";
 import { appendFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import {
+  type ActiveTaskEntry,
+  type TaskInput,
+  buildClaudeArgs,
+  computeEffectivePersist,
+  handleAbort,
+  validateSessionParams,
+} from "./session.js";
 
 // Debug logging to file - use /tmp for reliable access
 const LOG_FILE = "/tmp/fallback-agent-debug.log";
@@ -102,9 +110,10 @@ const NESTED_TASK_TOOL: Tool = {
 Usage notes:
 1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
 2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.
-3. Each agent invocation is stateless. You will not be able to send additional messages to the agent, nor will the agent be able to communicate with you outside of its final report. Therefore, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
+3. By default each invocation runs in a fresh, isolated session (ephemeral). To chain calls against the same underlying Claude session, pass \`persistSession: true\` (or any of \`resume\`/\`continueRecent\`/\`sessionId\`) — the result text reports the \`session_id\` so the next call can pass \`resume: "<id>"\`. Without those params the invocation remains stateless and your prompt must be self-contained.
 4. The agent's outputs should generally be trusted
-5. IMPORTANT: The spawned agent runs as a fresh process with its own 200k context window and CAN use the Task tool.`,
+5. IMPORTANT: The spawned agent runs as a fresh process with its own 200k context window and CAN use the Task tool.
+6. A running task can be aborted out-of-band via the sibling \`AbortTask\` tool. Pass an explicit \`taskId\` here if you intend to abort; otherwise the auto-generated id appears in the first progress notification.`,
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -168,26 +177,71 @@ Usage notes:
         items: { type: "string" },
         description: "Additional directories to allow access to",
       },
+      sessionId: {
+        type: "string",
+        description:
+          "Specific session UUID for the new session (maps to --session-id). When combined with resume/continueRecent, forkSession must also be true.",
+      },
+      resume: {
+        type: "string",
+        description:
+          "Resume an existing session by UUID (maps to --resume). Implies persistSession=true; mutually exclusive with continueRecent.",
+      },
+      continueRecent: {
+        type: "boolean",
+        description:
+          "Resume the most recent session in workingDir (maps to --continue). Implies persistSession=true; mutually exclusive with resume.",
+      },
+      forkSession: {
+        type: "boolean",
+        description:
+          "When resuming, create a new session ID instead of reusing the original (maps to --fork-session). Requires resume or continueRecent.",
+      },
+      persistSession: {
+        type: "boolean",
+        description:
+          "Persist the session to disk so it can be resumed later. Default false (adds --no-session-persistence). Setting this to false alongside resume/continueRecent/sessionId/forkSession is rejected.",
+      },
+      taskId: {
+        type: "string",
+        description:
+          "Optional handle for out-of-band abort via the AbortTask tool. If omitted, an id is auto-generated and emitted in the first progress notification.",
+      },
     },
     required: ["prompt"],
   },
 };
 
-interface TaskInput {
-  description?: string;
-  prompt: string;
-  model?: "sonnet" | "opus" | "haiku";
-  workingDir?: string;
-  timeout?: number;
-  allowWrite?: boolean;
-  permissionMode?: "acceptEdits" | "auto" | "bypassPermissions" | "default" | "dontAsk" | "plan";
-  systemPrompt?: string;
-  appendSystemPrompt?: string;
-  allowedTools?: string[];
-  disallowedTools?: string[];
-  maxBudgetUsd?: number;
-  addDirs?: string[];
-}
+const ABORT_TASK_TOOL: Tool = {
+  name: "AbortTask",
+  description: `Abort a running Task that was launched via the sibling Task tool.
+
+Lookup is by \`taskId\` — either the value the caller passed to Task, or the auto-generated id emitted in Task's first progress notification (\`taskId=...\`).
+
+Returns one of:
+- \`aborted\` — task was running; the requested signal was delivered to the child process.
+- \`pending\` — task is mid-spawn (child not yet attached); the abort is queued and will fire the moment the spawn completes.
+- \`not_found\` — no active task with that id.
+- \`already_exited\` — task was found but the child process has already terminated.
+
+This is intended for out-of-band orchestration: a separate MCP client (or a sibling tool call) can cancel work without waiting for the original Task call to return.`,
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      taskId: {
+        type: "string",
+        description: "Task handle to abort",
+      },
+      signal: {
+        type: "string",
+        enum: ["SIGTERM", "SIGINT", "SIGKILL"],
+        default: "SIGTERM",
+        description: "POSIX signal to deliver (default SIGTERM)",
+      },
+    },
+    required: ["taskId"],
+  },
+};
 
 interface ToolOutput {
   tool: string;
@@ -214,8 +268,11 @@ const server = new Server(
   }
 );
 
-// Track active processes for abort handling
-const activeProcesses = new Map<string, ChildProcess>();
+// Track active tasks for abort handling. The entry is registered before
+// `spawn()` returns (with `proc: null`) so an AbortTask call that races the
+// spawn can queue itself; the spawn path consults `abortRequested` once the
+// real ChildProcess is attached and kills immediately if so.
+const activeProcesses = new Map<string, ActiveTaskEntry>();
 
 /**
  * Helper to format numbers with K/M suffixes
@@ -234,28 +291,53 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(0)}s`;
 }
 
+interface RunTaskResult {
+  success: boolean;
+  result?: string;
+  error?: string;
+  usage?: object;
+  toolUseCount?: number;
+  duration?: number;
+  tokens?: number;
+  cacheReadTokens?: number;
+  toolOutputs?: ToolOutput[];
+  sessionId?: string;
+  persisted?: boolean;
+  taskId?: string;
+}
+
+function generateTaskId(): string {
+  return `task-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 /**
  * Spawns a nested task (fresh Claude process) with streaming output
  */
 async function runTask(
   input: TaskInput,
   progressToken?: string | number,
-): Promise<{ success: boolean; result?: string; error?: string; usage?: object; toolUseCount?: number; duration?: number; tokens?: number; cacheReadTokens?: number; toolOutputs?: ToolOutput[] }> {
-  const {
-    description,
-    prompt,
-    model = "sonnet",
-    workingDir = process.cwd(),
-    timeout = 600000,
-    allowWrite = false,
-    permissionMode,
-    systemPrompt,
-    appendSystemPrompt,
-    allowedTools,
-    disallowedTools,
-    maxBudgetUsd,
-    addDirs,
-  } = input;
+): Promise<RunTaskResult> {
+  const validationError = validateSessionParams(input);
+  if (validationError) {
+    return { success: false, error: validationError };
+  }
+
+  const workingDir = input.workingDir ?? process.cwd();
+  const timeout = input.timeout ?? 600000;
+  const description = input.description;
+  const persisted = computeEffectivePersist(input);
+
+  const taskId = input.taskId ?? generateTaskId();
+  if (input.taskId && activeProcesses.has(taskId)) {
+    return {
+      success: false,
+      error: `taskId collision: ${taskId} is already active`,
+    };
+  }
+
+  const args = buildClaudeArgs(input, {
+    CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT,
+  });
 
   const state: ProgressState = {
     toolUseCount: 0,
@@ -264,93 +346,53 @@ async function runTask(
     toolOutputs: [],
   };
 
-  // Build CLI arguments - matching native Task tool capabilities
-  const args: string[] = [
-    "-p", prompt,
-    "--output-format", "stream-json",
-    "--verbose",
-    "--model", model,
-  ];
+  // Reserve the entry synchronously so AbortTask calls that arrive during
+  // (or even before) spawn can queue themselves against this taskId.
+  activeProcesses.set(taskId, { proc: null, abortRequested: false });
 
-  // Permission handling
-  if (allowWrite) {
-    args.push("--dangerously-skip-permissions");
-  } else if (permissionMode) {
-    args.push("--permission-mode", permissionMode);
-  }
-
-  // System prompt
-  if (systemPrompt) {
-    args.push("--system-prompt", systemPrompt);
-  }
-  if (appendSystemPrompt) {
-    args.push("--append-system-prompt", appendSystemPrompt);
-  }
-
-  // Tool restrictions
-  if (allowedTools && allowedTools.length > 0) {
-    args.push("--allowed-tools", ...allowedTools);
-  }
-  if (disallowedTools && disallowedTools.length > 0) {
-    args.push("--disallowed-tools", ...disallowedTools);
-  }
-
-  // Budget
-  if (maxBudgetUsd !== undefined) {
-    args.push("--max-budget-usd", String(maxBudgetUsd));
-  }
-
-  // Additional directories
-  if (addDirs && addDirs.length > 0) {
-    args.push("--add-dir", ...addDirs);
-  }
-
-  // Don't persist session (isolation)
-  args.push("--no-session-persistence");
-
-  // CRITICAL: Pass plugin directory so spawned process has access to the same plugins
-  // This enables true nested subagents - the spawned process can also use this MCP tool
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (pluginRoot) {
-    args.push("--plugin-dir", pluginRoot);
+  if (progressToken !== undefined) {
+    const label = description ? `Task: ${description}` : "Task";
+    server.notification({
+      method: "notifications/progress",
+      params: {
+        progressToken,
+        progress: 0,
+        message: `${label} · taskId=${taskId}`,
+      },
+    });
   }
 
   return new Promise((resolve) => {
     let lastResult: StreamMessage | null = null;
+    let capturedSessionId: string | undefined;
     let timedOut = false;
-    const processId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    log(`[${processId}] CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || '(not set)'}`);
-    log(`[${processId}] Spawning claude with args: ${JSON.stringify(args)}`);
-    log(`[${processId}] Working dir: ${workingDir}`);
+    log(`[${taskId}] CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || '(not set)'}`);
+    log(`[${taskId}] Spawning claude with args: ${JSON.stringify(args)}`);
+    log(`[${taskId}] Working dir: ${workingDir}`);
 
-    // Spawn Claude CLI
     const proc = spawn("claude", args, {
       cwd: workingDir,
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    log(`[${processId}] Process spawned with PID: ${proc.pid}`);
+    log(`[${taskId}] Process spawned with PID: ${proc.pid}`);
 
     // Close stdin immediately - Claude with -p doesn't need it
     proc.stdin?.end();
-    log(`[${processId}] stdin closed`);
+    log(`[${taskId}] stdin closed`);
 
-    // Track for abort
-    activeProcesses.set(processId, proc);
-
-    // Surface the caller-supplied description as the first progress message,
-    // so the streaming UI shows a task label before the spawned session boots.
-    if (progressToken !== undefined && description) {
-      server.notification({
-        method: "notifications/progress",
-        params: {
-          progressToken,
-          progress: 0,
-          message: `Task: ${description}`,
-        },
-      });
+    // Attach the real ChildProcess to the placeholder. If AbortTask was called
+    // while we were spawning, deliver the queued signal immediately.
+    const entry = activeProcesses.get(taskId);
+    if (entry) {
+      entry.proc = proc;
+      if (entry.abortRequested) {
+        const sig = entry.abortSignal ?? "SIGTERM";
+        log(`[${taskId}] Delivering queued abort signal: ${sig}`);
+        proc.kill(sig);
+      }
     }
 
     // Timeout handling
@@ -364,20 +406,18 @@ async function runTask(
       }, 5000);
     }, timeout);
 
-    // Parse streaming JSON output line by line
     const rl = createInterface({ input: proc.stdout! });
 
     rl.on("line", (line) => {
-      log(`[${processId}] STDOUT line: ${line.slice(0, 200)}${line.length > 200 ? '...' : ''}`);
+      log(`[${taskId}] STDOUT line: ${line.slice(0, 200)}${line.length > 200 ? '...' : ''}`);
       if (!line.trim()) return;
 
       try {
         const msg: StreamMessage = JSON.parse(line);
 
-        // Handle different message types
         switch (msg.type) {
           case "system":
-            // Session initialized - could emit init progress
+            if (msg.session_id) capturedSessionId = msg.session_id;
             if (progressToken !== undefined) {
               server.notification({
                 method: "notifications/progress",
@@ -391,7 +431,6 @@ async function runTask(
             break;
 
           case "assistant":
-            // Check for tool uses
             if (msg.message?.content) {
               for (const block of msg.message.content) {
                 if (block.type === "tool_use" && block.name) {
@@ -409,7 +448,6 @@ async function runTask(
                     });
                   }
                 } else if (block.type === "text" && block.text) {
-                  // Text response
                   if (progressToken !== undefined) {
                     server.notification({
                       method: "notifications/progress",
@@ -426,10 +464,8 @@ async function runTask(
             break;
 
           case "user":
-            // Tool result - capture output and emit progress
             if (msg.tool_use_result) {
               const stdout = msg.tool_use_result.stdout || "";
-              // Capture tool output for final result
               if (stdout && state.currentToolUse) {
                 state.toolOutputs.push({
                   tool: state.currentToolUse,
@@ -451,7 +487,6 @@ async function runTask(
             break;
 
           case "result":
-            // Final result
             lastResult = msg;
             break;
         }
@@ -471,26 +506,28 @@ async function runTask(
       proc.stderr.on("data", (data: Buffer) => {
         const chunk = data.toString();
         stderr += chunk;
-        log(`[${processId}] STDERR: ${chunk}`);
+        log(`[${taskId}] STDERR: ${chunk}`);
       });
       proc.stderr.once("end", () => resolveDrain());
       proc.stderr.once("error", () => resolveDrain());
     });
 
-    // Handle process completion
     proc.on("close", async (code: number | null) => {
       await stderrDrained;
-      log(`[${processId}] Process closed with code: ${code}`);
+      log(`[${taskId}] Process closed with code: ${code}`);
       clearTimeout(timeoutId);
-      activeProcesses.delete(processId);
+      activeProcesses.delete(taskId);
       const duration = Date.now() - state.startTime;
-      log(`[${processId}] Duration: ${duration}ms, timedOut: ${timedOut}, hasResult: ${!!lastResult}`);
+      log(`[${taskId}] Duration: ${duration}ms, timedOut: ${timedOut}, hasResult: ${!!lastResult}`);
 
       if (timedOut) {
-        log(`[${processId}] Resolving with timeout error`);
+        log(`[${taskId}] Resolving with timeout error`);
         resolve({
           success: false,
           error: `Task timed out after ${timeout}ms`,
+          taskId,
+          sessionId: capturedSessionId,
+          persisted,
         });
         return;
       }
@@ -505,7 +542,6 @@ async function runTask(
           : 0;
         const cacheReadTokens = lastResult.usage?.cache_read_input_tokens ?? 0;
 
-        // Emit final progress
         if (progressToken !== undefined) {
           server.notification({
             method: "notifications/progress",
@@ -527,6 +563,9 @@ async function runTask(
           tokens: totalTokens,
           cacheReadTokens,
           toolOutputs: state.toolOutputs,
+          sessionId: capturedSessionId,
+          persisted,
+          taskId,
         });
       } else if (code === 0) {
         resolve({
@@ -536,21 +575,28 @@ async function runTask(
           duration,
           tokens: 0,
           toolOutputs: state.toolOutputs,
+          sessionId: capturedSessionId,
+          persisted,
+          taskId,
         });
       } else {
         resolve({
           success: false,
           error: stderr.trim() || `Process exited with code ${code}`,
+          sessionId: capturedSessionId,
+          persisted,
+          taskId,
         });
       }
     });
 
     proc.on("error", (err: Error) => {
       clearTimeout(timeoutId);
-      activeProcesses.delete(processId);
+      activeProcesses.delete(taskId);
       resolve({
         success: false,
         error: `Failed to spawn: ${err.message}`,
+        taskId,
       });
     });
   });
@@ -558,12 +604,33 @@ async function runTask(
 
 // Handle tool listing
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [NESTED_TASK_TOOL],
+  tools: [NESTED_TASK_TOOL, ABORT_TASK_TOOL],
 }));
 
 // Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   log(`Tool called: ${request.params.name}`);
+
+  if (request.params.name === "AbortTask") {
+    const args = request.params.arguments as
+      | { taskId?: string; signal?: NodeJS.Signals }
+      | undefined;
+    const taskId = args?.taskId;
+    const signal = args?.signal ?? "SIGTERM";
+    if (!taskId) {
+      return {
+        content: [{ type: "text", text: "Error: taskId is required" }],
+        isError: true,
+      };
+    }
+    const outcome = handleAbort(activeProcesses, taskId, signal);
+    log(`AbortTask(${taskId}, ${signal}) -> ${outcome}`);
+    const isError = outcome === "not_found";
+    return {
+      content: [{ type: "text", text: outcome }],
+      ...(isError ? { isError: true } : {}),
+    };
+  }
 
   if (request.params.name !== "Task") {
     return {
@@ -588,6 +655,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const result = await runTask(input, progressToken);
   log(`Result: success=${result.success}, error=${result.error}`);
 
+  // Session metadata trailer — always appended when the system event yielded
+  // a session_id (which it does for every spawn). Callers parse the two
+  // labeled lines below to chain or correlate logs.
+  const metadataLines: string[] = [];
+  if (result.taskId) metadataLines.push(`task_id: ${result.taskId}`);
+  if (result.sessionId) metadataLines.push(`session_id: ${result.sessionId}`);
+  if (result.persisted !== undefined) {
+    metadataLines.push(`persisted: ${result.persisted}`);
+  }
+  const metadataTrailer = metadataLines.length > 0
+    ? `\n${metadataLines.join("\n")}`
+    : "";
+
   if (result.success) {
     // Format output to match native Task tool: "Done (X tool uses · Yk tokens · Zs)"
     const toolUseText = result.toolUseCount === 1 ? '1 tool use' : `${result.toolUseCount ?? 0} tool uses`;
@@ -596,7 +676,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ? ` · ${formatNumber(result.cacheReadTokens ?? 0)} cached`
       : '';
     const durationText = formatDuration(result.duration ?? 0);
-    const summary = `Done (${toolUseText} · ${tokensText}${cacheText} · ${durationText})`;
+    const summary = `Done (${toolUseText} · ${tokensText}${cacheText} · ${durationText})${metadataTrailer}`;
 
     // Format tool outputs for display (similar to native Task tool)
     let toolOutputsText = '';
@@ -625,7 +705,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       content: [
         {
           type: "text",
-          text: `Error: ${result.error}`,
+          text: `Error: ${result.error}${metadataTrailer}`,
         },
       ],
       isError: true,
@@ -635,20 +715,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Graceful shutdown - abort all active processes
 process.on("SIGTERM", () => {
-  for (const [id, proc] of activeProcesses) {
-    proc.kill("SIGTERM");
+  for (const entry of activeProcesses.values()) {
+    entry.proc?.kill("SIGTERM");
   }
   setTimeout(() => {
-    for (const [id, proc] of activeProcesses) {
-      if (!proc.killed) proc.kill("SIGKILL");
+    for (const entry of activeProcesses.values()) {
+      if (entry.proc && !entry.proc.killed) entry.proc.kill("SIGKILL");
     }
     process.exit(0);
   }, 5000);
 });
 
 process.on("SIGINT", () => {
-  for (const [id, proc] of activeProcesses) {
-    proc.kill("SIGINT");
+  for (const entry of activeProcesses.values()) {
+    entry.proc?.kill("SIGINT");
   }
   process.exit(0);
 });
