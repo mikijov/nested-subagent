@@ -208,3 +208,19 @@ export function handleAbort(
   entry.proc.kill(signal);
   return "aborted";
 }
+
+export function shutdownChildren(
+  map: Map<string, ActiveTaskEntry>,
+  signal: "SIGTERM" | "SIGINT",
+  graceMs = 5000,
+): void {
+  for (const entry of map.values()) {
+    entry.proc?.kill(signal);
+  }
+  setTimeout(() => {
+    for (const entry of map.values()) {
+      if (entry.proc && !entry.proc.killed) entry.proc.kill("SIGKILL");
+    }
+    process.exit(0);
+  }, graceMs);
+}

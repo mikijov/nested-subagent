@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   handleAbort,
+  shutdownChildren,
   type AbortableProc,
   type ActiveTaskEntry,
 } from "../src/session.js";
@@ -84,5 +85,68 @@ describe("handleAbort", () => {
       proc.kill(entry.abortSignal ?? "SIGTERM");
     }
     expect(proc.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+});
+
+describe("shutdownChildren", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(process, "exit").mockImplementation(
+      ((_code?: number) => undefined) as never,
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("sends SIGTERM to every live child, then SIGKILLs survivors after the grace period", () => {
+    const a = makeProc();
+    const b = makeProc();
+    const map = new Map<string, ActiveTaskEntry>();
+    map.set("a", { proc: a, abortRequested: false });
+    map.set("b", { proc: b, abortRequested: false });
+
+    shutdownChildren(map, "SIGTERM", 50);
+
+    expect(a.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(b.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(process.exit).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(50);
+
+    expect(a.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(b.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(process.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("threads SIGINT through as the initial signal", () => {
+    const proc = makeProc();
+    const map = new Map<string, ActiveTaskEntry>();
+    map.set("a", { proc, abortRequested: false });
+
+    shutdownChildren(map, "SIGINT", 50);
+
+    expect(proc.kill).toHaveBeenCalledWith("SIGINT");
+
+    vi.advanceTimersByTime(50);
+
+    expect(proc.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(process.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("only SIGKILLs procs that haven't already been killed", () => {
+    const dead = makeProc({ killed: true });
+    const alive = makeProc();
+    const map = new Map<string, ActiveTaskEntry>();
+    map.set("dead", { proc: dead, abortRequested: false });
+    map.set("alive", { proc: alive, abortRequested: false });
+
+    shutdownChildren(map, "SIGTERM", 50);
+    vi.advanceTimersByTime(50);
+
+    expect(dead.kill).not.toHaveBeenCalledWith("SIGKILL");
+    expect(alive.kill).toHaveBeenCalledWith("SIGKILL");
   });
 });

@@ -13776,6 +13776,13 @@ function handleAbort(map, taskId, signal = "SIGTERM") {
 	entry.proc.kill(signal);
 	return "aborted";
 }
+function shutdownChildren(map, signal, graceMs = 5e3) {
+	for (const entry of map.values()) entry.proc?.kill(signal);
+	setTimeout(() => {
+		for (const entry of map.values()) if (entry.proc && !entry.proc.killed) entry.proc.kill("SIGKILL");
+		process.exit(0);
+	}, graceMs);
+}
 
 //#endregion
 //#region src/index.ts
@@ -14411,17 +14418,8 @@ function buildTaskPayload(result, includeToolOutputs) {
 	}
 	return payload;
 }
-process.on("SIGTERM", () => {
-	for (const entry of activeProcesses.values()) entry.proc?.kill("SIGTERM");
-	setTimeout(() => {
-		for (const entry of activeProcesses.values()) if (entry.proc && !entry.proc.killed) entry.proc.kill("SIGKILL");
-		process.exit(0);
-	}, 5e3);
-});
-process.on("SIGINT", () => {
-	for (const entry of activeProcesses.values()) entry.proc?.kill("SIGINT");
-	process.exit(0);
-});
+process.on("SIGTERM", () => shutdownChildren(activeProcesses, "SIGTERM"));
+process.on("SIGINT", () => shutdownChildren(activeProcesses, "SIGINT"));
 async function main() {
 	const transport = new StdioServerTransport();
 	await server.connect(transport);

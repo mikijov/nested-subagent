@@ -44,6 +44,7 @@ import {
   buildClaudeArgs,
   computeEffectivePersist,
   handleAbort,
+  shutdownChildren,
   validateSessionParams,
 } from "./session.js";
 
@@ -856,24 +857,8 @@ function buildTaskPayload(
 }
 
 // Graceful shutdown - abort all active processes
-process.on("SIGTERM", () => {
-  for (const entry of activeProcesses.values()) {
-    entry.proc?.kill("SIGTERM");
-  }
-  setTimeout(() => {
-    for (const entry of activeProcesses.values()) {
-      if (entry.proc && !entry.proc.killed) entry.proc.kill("SIGKILL");
-    }
-    process.exit(0);
-  }, 5000);
-});
-
-process.on("SIGINT", () => {
-  for (const entry of activeProcesses.values()) {
-    entry.proc?.kill("SIGINT");
-  }
-  process.exit(0);
-});
+process.on("SIGTERM", () => shutdownChildren(activeProcesses, "SIGTERM"));
+process.on("SIGINT", () => shutdownChildren(activeProcesses, "SIGINT"));
 
 // Start server
 async function main() {
