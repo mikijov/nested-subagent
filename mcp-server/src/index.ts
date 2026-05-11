@@ -51,6 +51,7 @@ import {
   validatePermissionParams,
   validateSessionParams,
 } from "./session.js";
+import pkg from "../package.json" with { type: "json" };
 
 // Debug log lives in os.tmpdir() with mode 0600 — the file captures prompts,
 // system prompts, and child stderr, so it must not be world-readable on
@@ -391,7 +392,7 @@ This is intended for out-of-band orchestration: a separate MCP client (or a sibl
 const server = new Server(
   {
     name: "nested-subagent",
-    version: "3.0.0",
+    version: pkg.version,
   },
   {
     capabilities: {
@@ -804,7 +805,7 @@ process.on("SIGINT", () => shutdownChildren(activeProcesses, "SIGINT"));
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Nested Subagent MCP Server v2.0.0 (streaming) running on stdio");
+  console.error(`Nested Subagent MCP Server v${pkg.version} (streaming) running on stdio`);
 }
 
 main().catch((error) => {

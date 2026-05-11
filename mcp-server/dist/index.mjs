@@ -614,9 +614,9 @@ const guid = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9
 /** Returns a regex for validating an RFC 9562/4122 UUID.
 *
 * @param version Optionally specify a version 1-8. If no version is specified, all versions are supported. */
-const uuid = (version$1) => {
-	if (!version$1) return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
-	return /* @__PURE__ */ new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version$1}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
+const uuid = (version$2) => {
+	if (!version$2) return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
+	return /* @__PURE__ */ new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version$2}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
 };
 /** Practical email validation */
 const email = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
@@ -1053,7 +1053,7 @@ var Doc = class {
 
 //#endregion
 //#region node_modules/zod/v4/core/versions.js
-const version = {
+const version$1 = {
 	major: 4,
 	minor: 4,
 	patch: 3
@@ -1066,7 +1066,7 @@ const $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
 	inst ?? (inst = {});
 	inst._zod.def = def;
 	inst._zod.bag = inst._zod.bag || {};
-	inst._zod.version = version;
+	inst._zod.version = version$1;
 	const checks = [...inst._zod.def.checks ?? []];
 	if (inst._zod.traits.has("$ZodCheck")) checks.unshift(inst);
 	for (const ch of checks) for (const fn of ch._zod.onattach) fn(inst);
@@ -13887,6 +13887,10 @@ function buildTaskPayload(result, includeToolOutputs, includeThinking) {
 }
 
 //#endregion
+//#region package.json
+var version = "3.0.0";
+
+//#endregion
 //#region src/index.ts
 /**
 * Nested Subagent MCP Server - Streaming Edition
@@ -14200,7 +14204,7 @@ This is intended for out-of-band orchestration: a separate MCP client (or a sibl
 };
 const server = new Server({
 	name: "nested-subagent",
-	version: "3.0.0"
+	version
 }, { capabilities: { tools: {} } });
 const activeProcesses = /* @__PURE__ */ new Map();
 function generateTaskId() {
@@ -14513,7 +14517,7 @@ process.on("SIGINT", () => shutdownChildren(activeProcesses, "SIGINT"));
 async function main() {
 	const transport = new StdioServerTransport();
 	await server.connect(transport);
-	console.error("Nested Subagent MCP Server v2.0.0 (streaming) running on stdio");
+	console.error(`Nested Subagent MCP Server v${version} (streaming) running on stdio`);
 }
 main().catch((error) => {
 	console.error("Fatal error:", error);

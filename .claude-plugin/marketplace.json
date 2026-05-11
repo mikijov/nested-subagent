@@ -9,7 +9,7 @@
       "name": "nested-subagent",
       "source": "./",
       "description": "Spawns fresh Claude processes with full tool access. Bypasses the native Task tool's recursion limit, enabling unlimited nesting.",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "mcpServers": {
         "nested": {
           "command": "node",
