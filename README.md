@@ -10,6 +10,8 @@ Enable **unlimited nested subagents** in Claude Code. Subagents can spawn their 
 
 _Forked from [gruckion/nested-subagent](https://github.com/gruckion/nested-subagent) — original work © CloudAI-X._
 
+Pick this fork over `fallback-agent` if you're building multi-agent orchestration — chaining long-running sessions, running parallel investigations, or letting a parent agent inspect, resume, or cancel its children. Upstream is the right call for one-shot helpers; this one is built for workflows where agents talk to other agents.
+
 ---
 
 ## Prerequisites
