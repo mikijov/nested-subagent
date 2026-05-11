@@ -1,7 +1,9 @@
 import process$1 from "node:process";
 import { spawn } from "child_process";
 import { createInterface } from "readline";
-import { appendFileSync, writeFileSync } from "fs";
+import { appendFileSync, unlinkSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 //#region rolldown:runtime
 var __create = Object.create;
@@ -13803,7 +13805,7 @@ function handleAbort(map, taskId, signal = "SIGTERM") {
 *             └── Returns final result when complete
 * ```
 */
-const LOG_FILE = "/tmp/nested-subagent-debug.log";
+const LOG_FILE = join(tmpdir(), "nested-subagent-debug.log");
 function log(message) {
 	const logLine = `[${(/* @__PURE__ */ new Date()).toISOString()}] ${message}\n`;
 	try {
@@ -13811,7 +13813,10 @@ function log(message) {
 	} catch {}
 }
 try {
-	writeFileSync(LOG_FILE, `=== Nested Subagent MCP Server Started ===\n`);
+	try {
+		unlinkSync(LOG_FILE);
+	} catch {}
+	writeFileSync(LOG_FILE, `=== Nested Subagent MCP Server Started ===\n`, { mode: 384 });
 	appendFileSync(LOG_FILE, `CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || "(not set)"}\n`);
 } catch {}
 const NESTED_TASK_TOOL = {

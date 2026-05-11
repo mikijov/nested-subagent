@@ -236,10 +236,18 @@ proc.stdin?.end();  // CRITICAL: Close stdin immediately
 
 #### Debug Logging
 
-All operations are logged to `/tmp/nested-subagent-debug.log`:
+All operations are logged to `<os.tmpdir()>/nested-subagent-debug.log`. The file
+is created with mode `0600` so the captured prompts, system prompts, and child
+stderr can't be read by other local users on shared hosts.
 
 ```typescript
-const LOG_FILE = "/tmp/nested-subagent-debug.log";
+const LOG_FILE = path.join(os.tmpdir(), "nested-subagent-debug.log");
+
+// On startup: unlink first so writeFileSync's mode option applies (it only
+// takes effect on file creation, not when truncating an existing file).
+try { fs.unlinkSync(LOG_FILE); } catch {}
+fs.writeFileSync(LOG_FILE, "=== started ===\n", { mode: 0o600 });
+
 function log(message: string) {
   fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${message}\n`);
 }

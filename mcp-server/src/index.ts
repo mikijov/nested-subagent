@@ -34,7 +34,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from "child_process";
 import { createInterface } from "readline";
-import { appendFileSync, writeFileSync } from "fs";
+import { appendFileSync, unlinkSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import {
   type ActiveTaskEntry,
@@ -46,8 +47,10 @@ import {
   validateSessionParams,
 } from "./session.js";
 
-// Debug logging to file - use /tmp for reliable access
-const LOG_FILE = "/tmp/nested-subagent-debug.log";
+// Debug log lives in os.tmpdir() with mode 0600 — the file captures prompts,
+// system prompts, and child stderr, so it must not be world-readable on
+// shared hosts.
+const LOG_FILE = join(tmpdir(), "nested-subagent-debug.log");
 function log(message: string) {
   const timestamp = new Date().toISOString();
   const logLine = `[${timestamp}] ${message}\n`;
@@ -58,9 +61,11 @@ function log(message: string) {
   }
 }
 
-// Initialize log file
+// Initialize log file. Unlink first so writeFileSync's mode option applies
+// — it's only honored on file creation, not when truncating an existing file.
 try {
-  writeFileSync(LOG_FILE, `=== Nested Subagent MCP Server Started ===\n`);
+  try { unlinkSync(LOG_FILE); } catch {}
+  writeFileSync(LOG_FILE, `=== Nested Subagent MCP Server Started ===\n`, { mode: 0o600 });
   appendFileSync(LOG_FILE, `CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || '(not set)'}\n`);
 } catch {
   // Ignore

@@ -93,7 +93,7 @@ Then it line-parses stdout (newline-delimited JSON) and emits MCP `notifications
 - Session lifecycle validation lives in `validateSessionParams` (`session.ts`). Rules: `resume`/`continueRecent` are mutually exclusive; `forkSession` requires one of them; `sessionId` + `resume`/`continueRecent` requires `forkSession` (CLI requirement).
 - `activeProcesses` is `Map<string, ActiveTaskEntry>`. Entries are registered with `proc: null` **before** `spawn()` returns so an `AbortTask` call that races the spawn can queue a signal; the spawn path delivers the queued signal once it attaches the real `ChildProcess`.
 - Timeout: `SIGTERM`, then `SIGKILL` 5s later. All active entries are torn down on `SIGTERM`/`SIGINT` to the server itself.
-- Debug log: `/tmp/nested-subagent-debug.log` (overwritten on each server start).
+- Debug log: `<os.tmpdir()>/nested-subagent-debug.log`, created with mode `0600` so prompts and stderr don't leak to other local users. Overwritten on each server start.
 - Persistent sessions accumulate under `~/.claude/sessions/`. The plugin does not clean them up.
 
 ## Tool parameters
