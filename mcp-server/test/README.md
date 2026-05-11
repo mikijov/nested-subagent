@@ -61,9 +61,16 @@ npx vitest run test/helpers.test.ts
 ```
 test/
 ├── helpers/
-│   └── claude-cli.ts          # Claude CLI spawning utilities
-├── helpers.test.ts            # Unit tests for helpers (free)
-├── basic-nesting.integration.test.ts    # Full integration tests (costs $)
+│   └── claude-cli.ts                       # Claude CLI spawning utilities
+├── helpers.test.ts                         # Unit (free)
+├── abort.test.ts                           # Unit (free)
+├── validation.test.ts                      # Unit (free)
+├── session-args.test.ts                    # Unit (free)
+├── thinking.test.ts                        # Unit (free)
+├── basic-nesting.integration.test.ts       # Integration (costs $)
+├── marathon-workflow.integration.test.ts   # Integration (costs $)
+├── mcp-installed.integration.test.ts       # Integration (costs $)
+├── session.integration.test.ts             # Integration (costs $)
 └── README.md
 ```
 

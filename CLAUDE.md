@@ -74,6 +74,7 @@ The spawn command produced by `buildClaudeArgs`:
 
 ```
 claude -p <prompt> --output-format stream-json --verbose --model <model> \
+  [--effort <level>] \
   [--dangerously-skip-permissions | --permission-mode <mode>] \
   [--system-prompt …] [--append-system-prompt …] \
   [--allowed-tools …] [--disallowed-tools …] \
@@ -108,8 +109,8 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 | Parameter            | Type     | Notes                                                                |
 |----------------------|----------|----------------------------------------------------------------------|
 | `prompt`             | string   | Required.                                                            |
-| `model`              | enum     | `sonnet` (default) \| `opus` \| `haiku`.                             |
-| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Maps to `--effort` (extended thinking budget). Omit to use claude's default. |
+| `model`              | enum     | `opus` (default) \| `sonnet` \| `haiku`.                             |
+| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Maps to `--effort` (extended thinking budget). Default `xhigh` (always emitted). |
 | `workingDir`         | string   | Defaults to `process.cwd()`.                                         |
 | `timeout`            | number   | Milliseconds. Default `600000` (10 min).                             |
 | `allowWrite`         | boolean  | Default `false`. **Narrow gate on file-modifying tools.** When `false`, `Write`/`Edit`/`NotebookEdit` are appended to `--disallowed-tools` and a read-only-files note is appended to `--append-system-prompt`. When `true`, those tools are permitted (subject to `permissionMode`). Bash is **not** blocked — shell-based writes (`sed -i`, `>` redirects, `tee`) remain possible and are only discouraged via the system-prompt note. |

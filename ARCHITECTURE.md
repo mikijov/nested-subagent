@@ -119,7 +119,7 @@ The spawned `claude -p` process is a **completely new main agent**, not a sub-ag
 ```
 nested-subagent/
 ├── .claude-plugin/
-│   └── plugin.json              # Plugin manifest (name: "nested")
+│   └── marketplace.json        # Plugin manifest (name: "nested-subagent")
 ├── .mcp.json                    # MCP server configuration
 ├── mcp-server/
 │   ├── package.json
@@ -139,10 +139,9 @@ nested-subagent/
 // .mcp.json
 {
   "mcpServers": {
-    "subagent": {
-      "command": "npx",
-      "args": ["tsx", "${CLAUDE_PLUGIN_ROOT}/mcp-server/src/index.ts"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    "nested": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.mjs"]
     }
   }
 }
@@ -178,9 +177,6 @@ The MCP server (`mcp-server/src/index.ts`) works by:
 ```typescript
 // Task tool
 {
-  // Optional UI description
-  description?: string,        // Short task summary (3-5 words)
-
   // Required
   prompt: string,              // The task for the agent to perform
 
@@ -190,8 +186,8 @@ The MCP server (`mcp-server/src/index.ts`) works by:
   workingDir?: string,
   timeout?: number,            // Default: 600000 (10 min)
   allowWrite?: boolean,        // Gate on Write/Edit/NotebookEdit; default false adds them to --disallowed-tools + read-only-files system prompt note
-  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan",  // mutex with dangerouslySkipPermissions
-  dangerouslySkipPermissions?: boolean,  // --dangerously-skip-permissions (bypass ALL prompts)
+  permissionMode?: "acceptEdits" | "auto" | "bypassPermissions" | "default" | "dontAsk" | "plan",  // mutex with dangerouslySkipPermissions
+  dangerouslySkipPermissions?: boolean,  // --dangerously-skip-permissions; bypass ALL prompts; mutex with permissionMode
   systemPrompt?: string,       // --system-prompt
   appendSystemPrompt?: string, // --append-system-prompt
   allowedTools?: string[],     // --allowed-tools
@@ -208,6 +204,9 @@ The MCP server (`mcp-server/src/index.ts`) works by:
 
   // Out-of-band abort handle
   taskId?: string,             // caller-supplied; otherwise auto-generated and emitted in progress
+
+  // Response shape
+  includeToolOutputs?: boolean,  // default false; include raw tool stdouts (each truncated to 16 KB)
 }
 
 // AbortTask tool — sibling for out-of-band cancellation
