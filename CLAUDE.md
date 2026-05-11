@@ -106,8 +106,8 @@ Schema lives in `mcp-server/src/index.ts` (`NESTED_TASK_TOOL.inputSchema`); the 
 |----------------------|----------|----------------------------------------------------------------------|
 | `prompt`             | string   | Required.                                                            |
 | `description`        | string   | 3–5 word UI summary.                                                 |
-| `model`              | enum     | `sonnet` (default) \| `opus` \| `haiku`.                             |
-| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Maps to `--effort` (extended thinking budget). Omit to use `claude`'s default. |
+| `model`              | enum     | `sonnet` \| `opus` (default) \| `haiku`.                             |
+| `effort`             | enum     | `low` \| `medium` \| `high` \| `xhigh` (default) \| `max`. Maps to `--effort` (extended thinking budget). |
 | `workingDir`         | string   | Defaults to `process.cwd()`.                                         |
 | `timeout`            | number   | Milliseconds. Default `600000` (10 min).                             |
 | `allowWrite`         | boolean  | Adds `--dangerously-skip-permissions` (mutually exclusive w/ below). |

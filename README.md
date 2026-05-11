@@ -95,7 +95,7 @@ This Plugin:     Main → Nested → Isolated Main → Subagent → ✓
 The plugin spawns `claude -p` with `--output-format stream-json` to get real-time progress, matching the native Task tool's behavior:
 
 ```bash
-claude -p "your task" --output-format stream-json --verbose --model sonnet
+claude -p "your task" --output-format stream-json --verbose --model opus
 ```
 
 This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) - spawning isolated Claude processes programmatically.
@@ -139,8 +139,8 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 |-----------|------|-------------|
 | `prompt` | string | **Required.** The task for the agent |
 | `description` | string | Short summary for UI display (3-5 words) |
-| `model` | string | `sonnet`, `opus`, or `haiku` (default: sonnet) |
-| `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget. Omit for `claude`'s default |
+| `model` | string | `sonnet`, `opus`, or `haiku` (default: opus) |
+| `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget (default: xhigh) |
 | `allowWrite` | boolean | Enable write permissions |
 | `permissionMode` | string | `acceptEdits` / `auto` / `bypassPermissions` / `default` / `dontAsk` / `plan`. Default `auto`. Ignored when `allowWrite` is true |
 | `timeout` | number | Timeout in ms (default: 600000) |

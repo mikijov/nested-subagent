@@ -128,13 +128,14 @@ Usage notes:
       model: {
         type: "string",
         enum: ["sonnet", "opus", "haiku"],
-        default: "sonnet",
-        description: "Model to use (default: sonnet)",
+        default: "opus",
+        description: "Model to use (default: opus)",
       },
       effort: {
         type: "string",
         enum: ["low", "medium", "high", "xhigh", "max"],
-        description: "Extended thinking budget for the spawned subagent (maps to --effort). Omit to use claude's default.",
+        default: "xhigh",
+        description: "Extended thinking budget for the spawned subagent (maps to --effort). Default: xhigh.",
       },
       workingDir: {
         type: "string",

@@ -30,7 +30,7 @@ describe("buildClaudeArgs", () => {
     expect(args).toContain("--output-format");
     expect(args).toContain("stream-json");
     expect(args).toContain("--verbose");
-    expect(flagValue(args, "--model")).toBe("sonnet");
+    expect(flagValue(args, "--model")).toBe("opus");
   });
 
   it("resume only: --resume <id>, no --no-session-persistence", () => {
@@ -157,9 +157,9 @@ describe("buildClaudeArgs", () => {
     expect(flagValue(args, "--effort")).toBe("high");
   });
 
-  it("effort: --effort is absent when unset", () => {
+  it("effort: --effort defaults to xhigh when unset", () => {
     const args = buildClaudeArgs(base);
-    expect(hasFlag(args, "--effort")).toBe(false);
+    expect(flagValue(args, "--effort")).toBe("xhigh");
   });
 
   it("permissionMode: defaults to --permission-mode auto when neither permissionMode nor allowWrite is set", () => {

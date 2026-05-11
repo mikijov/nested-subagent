@@ -184,7 +184,8 @@ The MCP server (`mcp-server/src/index.ts`) works by:
   prompt: string,              // The task for the agent to perform
 
   // Optional configuration
-  model?: "sonnet" | "opus" | "haiku",  // Default: "sonnet"
+  model?: "sonnet" | "opus" | "haiku",  // Default: "opus"
+  effort?: "low" | "medium" | "high" | "xhigh" | "max",  // Default: "xhigh"
   workingDir?: string,
   timeout?: number,            // Default: 600000 (10 min)
   allowWrite?: boolean,        // --dangerously-skip-permissions

@@ -13730,7 +13730,7 @@ function validateSessionParams(input) {
 * applied here too so the bundled bin can be tested end-to-end.
 */
 function buildClaudeArgs(input, env = {}) {
-	const { prompt, model = "sonnet", allowWrite = false, permissionMode, effort, systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession } = input;
+	const { prompt, model = "opus", allowWrite = false, permissionMode, effort = "xhigh", systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession } = input;
 	const args = [
 		"-p",
 		prompt,
@@ -13740,7 +13740,7 @@ function buildClaudeArgs(input, env = {}) {
 		"--model",
 		model
 	];
-	if (effort) args.push("--effort", effort);
+	args.push("--effort", effort);
 	if (allowWrite) args.push("--dangerously-skip-permissions");
 	else args.push("--permission-mode", permissionMode ?? "auto");
 	if (systemPrompt) args.push("--system-prompt", systemPrompt);
@@ -13847,8 +13847,8 @@ Usage notes:
 					"opus",
 					"haiku"
 				],
-				default: "sonnet",
-				description: "Model to use (default: sonnet)"
+				default: "opus",
+				description: "Model to use (default: opus)"
 			},
 			effort: {
 				type: "string",
@@ -13859,7 +13859,8 @@ Usage notes:
 					"xhigh",
 					"max"
 				],
-				description: "Extended thinking budget for the spawned subagent (maps to --effort). Omit to use claude's default."
+				default: "xhigh",
+				description: "Extended thinking budget for the spawned subagent (maps to --effort). Default: xhigh."
 			},
 			workingDir: {
 				type: "string",

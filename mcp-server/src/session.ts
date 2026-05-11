@@ -100,10 +100,10 @@ export function buildClaudeArgs(
 ): string[] {
   const {
     prompt,
-    model = "sonnet",
+    model = "opus",
     allowWrite = false,
     permissionMode,
-    effort,
+    effort = "xhigh",
     systemPrompt,
     appendSystemPrompt,
     allowedTools,
@@ -126,9 +126,7 @@ export function buildClaudeArgs(
     model,
   ];
 
-  if (effort) {
-    args.push("--effort", effort);
-  }
+  args.push("--effort", effort);
 
   if (allowWrite) {
     args.push("--dangerously-skip-permissions");
