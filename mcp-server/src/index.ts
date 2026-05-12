@@ -49,6 +49,7 @@ import {
   handleAbort,
   handleAssistantContent,
   handleUserContent,
+  parseNeedsInput,
   shutdownChildren,
   validatePermissionParams,
   validateSessionParams,
@@ -242,6 +243,12 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
         description:
           "If true, append the subagent's extended-thinking content to the response under `thinkingBlocks` (each entry truncated to 16 KB). Default false — the parent receives only `stats.thinkingBlocks` count, since intermediate reasoning is what subagent isolation absorbs. Two block shapes are counted but excluded from the surfaced array: redacted thinking (encrypted blob the parent can't decrypt) and empty-text thinking (Opus 4.x sometimes emits a signed-but-empty `{thinking: \"\"}` block when extended thinking is enabled but the model has no reasoning text for that turn). The result: `stats.thinkingBlocks >= thinkingBlocks.length`.",
       },
+      askOperator: {
+        type: "boolean",
+        default: false,
+        description:
+          "Operator escape hatch. When true, instructs the subagent (via --append-system-prompt) to emit a sentinel-wrapped JSON block in its final message instead of calling AskUserQuestion (which is unavailable in headless mode); the plugin parses that block and returns it as `needsInput`. The parent should call its own AskUserQuestion with `needsInput.questions`, then re-invoke Task with `resume: <sessionId>` and a prompt containing the answers. Implies persistSession=true. Detection is opt-in: sentinels emitted while askOperator=false are ignored. See ARCHITECTURE.md → Operator escape hatch for rationale.",
+      },
     },
     required: ["prompt"],
   },
@@ -346,6 +353,42 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
           },
           required: ["text"],
         },
+      },
+      needsInput: {
+        type: "object",
+        description:
+          "Present only when askOperator=true was passed AND the subagent emitted a valid sentinel-wrapped operator-input request in its final message. Mirrors the native AskUserQuestion input shape so the parent can pass `questions` straight through. The parent should call AskUserQuestion with these questions, then call Task again with `resume: <sessionId>` and a prompt containing the operator's answers.",
+        properties: {
+          questions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 4,
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string" },
+                header: { type: "string", maxLength: 12 },
+                multiSelect: { type: "boolean" },
+                options: {
+                  type: "array",
+                  minItems: 2,
+                  maxItems: 4,
+                  items: {
+                    type: "object",
+                    properties: {
+                      label: { type: "string" },
+                      description: { type: "string" },
+                      preview: { type: "string" },
+                    },
+                    required: ["label", "description"],
+                  },
+                },
+              },
+              required: ["question", "header", "multiSelect", "options"],
+            },
+          },
+        },
+        required: ["questions"],
       },
     },
     required: ["ok", "taskId"],
@@ -655,8 +698,14 @@ async function runTask(
           });
         }
 
+        const successFlag = !lastResult.is_error;
+        const needsInput =
+          successFlag && input.askOperator
+            ? parseNeedsInput(lastResult.result) ?? undefined
+            : undefined;
+
         resolve({
-          success: !lastResult.is_error,
+          success: successFlag,
           result: lastResult.result,
           errorKind: lastResult.is_error ? "exit_nonzero" : undefined,
           toolUseCount: state.toolUseCount,
@@ -671,6 +720,7 @@ async function runTask(
           sessionId: capturedSessionId,
           persisted,
           taskId,
+          needsInput,
         });
       } else if (code === 0) {
         resolve({

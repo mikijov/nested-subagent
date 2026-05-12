@@ -4,6 +4,7 @@ import {
   handleAssistantContent,
   TOOL_OUTPUT_MAX_BYTES,
   type AssistantContentBlock,
+  type NeedsInput,
   type ProgressState,
   type RunTaskResult,
 } from "../src/session.js";
@@ -225,5 +226,62 @@ describe("buildTaskPayload — thinking surfacing", () => {
     );
     expect(payload.stats?.thinkingBlocks).toBeUndefined();
     expect(payload.thinkingBlocks).toBeUndefined();
+  });
+});
+
+describe("buildTaskPayload — needsInput threading", () => {
+  const baseSuccess: RunTaskResult = {
+    success: true,
+    result: "...",
+    taskId: "task-test",
+    toolUseCount: 0,
+    duration: 1,
+  };
+
+  const sampleNeedsInput: NeedsInput = {
+    questions: [
+      {
+        question: "Pick one.",
+        header: "Pick",
+        multiSelect: false,
+        options: [
+          { label: "A", description: "alpha" },
+          { label: "B", description: "beta" },
+        ],
+      },
+    ],
+  };
+
+  it("threads needsInput through on success", () => {
+    const payload = buildTaskPayload(
+      { ...baseSuccess, needsInput: sampleNeedsInput },
+      false,
+      false,
+    );
+    expect(payload.ok).toBe(true);
+    expect(payload.needsInput).toEqual(sampleNeedsInput);
+    expect(payload.result).toBe("...");
+  });
+
+  it("omits needsInput when not provided", () => {
+    const payload = buildTaskPayload(baseSuccess, false, false);
+    expect(payload.needsInput).toBeUndefined();
+  });
+
+  it("omits needsInput on failure even when attached upstream", () => {
+    const payload = buildTaskPayload(
+      {
+        success: false,
+        error: "boom",
+        errorKind: "exit_nonzero",
+        taskId: "task-test",
+        needsInput: sampleNeedsInput,
+      },
+      false,
+      false,
+    );
+    expect(payload.ok).toBe(false);
+    expect(payload.needsInput).toBeUndefined();
+    expect(payload.error).toBe("boom");
   });
 });

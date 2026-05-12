@@ -37,6 +37,8 @@ export interface TaskInput {
   // Response shape
   includeToolOutputs?: boolean;
   includeThinking?: boolean;
+  // Operator escape hatch
+  askOperator?: boolean;
 }
 
 export type ErrorKind =
@@ -70,7 +72,8 @@ export function computeEffectivePersist(input: TaskInput): boolean {
     input.resume ||
       input.continueRecent ||
       input.forkSession ||
-      input.sessionId,
+      input.sessionId ||
+      input.askOperator,
   );
 }
 
@@ -80,6 +83,9 @@ export function computeEffectivePersist(input: TaskInput): boolean {
  * message verbatim.
  */
 export function validateSessionParams(input: TaskInput): string | null {
+  if (input.askOperator && input.persistSession === false) {
+    return "askOperator=true requires a persisted session (the parent must be able to resume to deliver operator answers); persistSession=false is incompatible";
+  }
   if (input.resume && input.continueRecent) {
     return "resume and continueRecent are mutually exclusive";
   }
@@ -116,6 +122,45 @@ export const WRITE_TOOLS = ["Write", "Edit", "NotebookEdit"] as const;
 export const READ_ONLY_FILES_PROMPT =
   "You are running with file modification disabled. You may read files and run analysis commands, but you must not create, modify, or delete files using Write, Edit, or NotebookEdit. Bash redirects, sed -i, tee, and similar shell-based file modification are also off-limits even though they are not hard-blocked.";
 
+// ---------------------------------------------------------------------------
+// Operator escape hatch
+// ---------------------------------------------------------------------------
+
+export interface NeedsInputOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface NeedsInputQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: NeedsInputOption[];
+}
+
+export interface NeedsInput {
+  questions: NeedsInputQuestion[];
+}
+
+export const ASK_OPERATOR_SENTINEL_OPEN = "<<<NEED_OPERATOR_INPUT>>>";
+export const ASK_OPERATOR_SENTINEL_CLOSE = "<<<END_OPERATOR_INPUT>>>";
+export const ASK_OPERATOR_MIN_QUESTIONS = 1;
+export const ASK_OPERATOR_MAX_QUESTIONS = 4;
+export const ASK_OPERATOR_MIN_OPTIONS = 2;
+export const ASK_OPERATOR_MAX_OPTIONS = 4;
+export const ASK_OPERATOR_MAX_HEADER_CHARS = 12;
+
+export const ASK_OPERATOR_PROMPT = `OPERATOR ESCAPE HATCH — READ CAREFULLY.
+
+You are running in headless mode. The AskUserQuestion tool is NOT available — calling it will fail. If you need operator input to proceed, do NOT guess and do NOT call any tool. Instead, end your work and emit a single block in your FINAL message, exactly in this form:
+
+${ASK_OPERATOR_SENTINEL_OPEN}
+{"questions":[{"question":"<one sentence asking what you need>","header":"<≤12 chars>","multiSelect":false,"options":[{"label":"<short label>","description":"<≤2 sentences>"},{"label":"<short label>","description":"<≤2 sentences>"}]}]}
+${ASK_OPERATOR_SENTINEL_CLOSE}
+
+Rules: the block MUST be valid JSON between the sentinels; you may include 1 to 4 questions and each must have 2 to 4 options; \`multiSelect\` is a boolean; \`header\` ≤ 12 chars; \`preview\` on an option is optional. Emit NOTHING after the closing sentinel — the orchestrator stops reading there. If you do NOT need operator input, complete the task normally and never emit the sentinels.`;
+
 /**
  * Build the full claude-CLI argv (excluding the `claude` exe itself) for a
  * Task input. Pure: no env reads, no spawn. The plugin-root propagation is
@@ -142,6 +187,7 @@ export function buildClaudeArgs(
     resume,
     continueRecent,
     forkSession,
+    askOperator = false,
   } = input;
 
   const args: string[] = [
@@ -167,6 +213,7 @@ export function buildClaudeArgs(
   const mergedAppendSP = [
     appendSystemPrompt,
     allowWrite ? null : READ_ONLY_FILES_PROMPT,
+    askOperator ? ASK_OPERATOR_PROMPT : null,
   ]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
@@ -294,6 +341,7 @@ export interface RunTaskResult {
   sessionId?: string;
   persisted?: boolean;
   taskId?: string;
+  needsInput?: NeedsInput;
 }
 
 export interface TaskStats {
@@ -317,6 +365,7 @@ export interface TaskPayload {
   toolUseSummary?: Array<{ tool: string; count: number }>;
   toolOutputs?: Array<{ tool: string; output: string }>;
   thinkingBlocks?: ThinkingBlock[];
+  needsInput?: NeedsInput;
 }
 
 export const TOOL_OUTPUT_MAX_BYTES = 16 * 1024;
@@ -474,6 +523,134 @@ export function handleUserContent(
   }
 }
 
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let from = 0;
+  while (true) {
+    const i = haystack.indexOf(needle, from);
+    if (i < 0) return count;
+    count++;
+    from = i + needle.length;
+  }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isObject(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+
+// Compiled once at module load — sentinel strings are static. Capture group 1
+// is the (lazy) body between the markers.
+const ASK_OPERATOR_BODY_RE = new RegExp(
+  `${escapeRegex(ASK_OPERATOR_SENTINEL_OPEN)}([\\s\\S]*?)${escapeRegex(
+    ASK_OPERATOR_SENTINEL_CLOSE,
+  )}`,
+);
+
+/**
+ * Extract a structured operator-input request from the subagent's final
+ * result text. Returns null on any failure (no sentinels, ambiguous sentinel
+ * count, malformed JSON, shape violations, empty body). Never throws.
+ *
+ * Detection rules:
+ * - Exactly one open AND one close sentinel. Zero pairs → null (normal exit).
+ *   Multiple opens or multiple closes → null (ambiguous; we do not pick).
+ * - JSON between the sentinels parses cleanly (optional ```/```json fence is
+ *   stripped first).
+ * - Strict shape validation: 1–4 questions, 2–4 options per question,
+ *   non-empty strings, multiSelect strictly boolean, header ≤ 12 chars.
+ */
+export function parseNeedsInput(
+  text: string | undefined | null,
+): NeedsInput | null {
+  if (!text) return null;
+  const openCount = countOccurrences(text, ASK_OPERATOR_SENTINEL_OPEN);
+  const closeCount = countOccurrences(text, ASK_OPERATOR_SENTINEL_CLOSE);
+  if (openCount === 0 && closeCount === 0) return null;
+  if (openCount !== 1 || closeCount !== 1) return null;
+
+  const m = ASK_OPERATOR_BODY_RE.exec(text);
+  // Both sentinels are present but the close precedes the open — the regex
+  // (which requires open-then-close) returns no match.
+  if (!m) return null;
+
+  let body = m[1].trim();
+  if (!body) return null;
+  // Strip optional markdown fence (```json … ``` / ``` … ```). Strict by
+  // design: the language tag must be followed by a newline (standard markdown
+  // form). A one-line fence like ```json{...}``` falls through to slice(3)
+  // and yields "json{...}", which fails JSON.parse → null. We accept that
+  // edge: the prompt instructs the model not to wrap at all, and the
+  // newline-form fence is the only artifact we've actually observed.
+  if (body.startsWith("```")) {
+    const firstNewline = body.indexOf("\n");
+    body = firstNewline >= 0 ? body.slice(firstNewline + 1) : body.slice(3);
+    if (body.endsWith("```")) body = body.slice(0, -3);
+    body = body.trim();
+    if (!body) return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  return validateNeedsInputShape(parsed);
+}
+
+/**
+ * Strict, total shape validator. Pure; never throws. Returns null on the first
+ * rule violation rather than collecting errors — failures are silent in this
+ * pipeline (the caller falls through to a normal success with no needsInput).
+ */
+function validateNeedsInputShape(value: unknown): NeedsInput | null {
+  if (!isObject(value)) return null;
+  const { questions } = value;
+  if (!Array.isArray(questions)) return null;
+  if (
+    questions.length < ASK_OPERATOR_MIN_QUESTIONS ||
+    questions.length > ASK_OPERATOR_MAX_QUESTIONS
+  ) {
+    return null;
+  }
+  const out: NeedsInputQuestion[] = [];
+  for (const q of questions) {
+    if (!isObject(q)) return null;
+    const { question, header, multiSelect, options } = q;
+    if (typeof question !== "string" || question.length === 0) return null;
+    if (typeof header !== "string" || header.length === 0) return null;
+    if (header.length > ASK_OPERATOR_MAX_HEADER_CHARS) return null;
+    if (typeof multiSelect !== "boolean") return null;
+    if (!Array.isArray(options)) return null;
+    if (
+      options.length < ASK_OPERATOR_MIN_OPTIONS ||
+      options.length > ASK_OPERATOR_MAX_OPTIONS
+    ) {
+      return null;
+    }
+    const opts: NeedsInputOption[] = [];
+    for (const o of options) {
+      if (!isObject(o)) return null;
+      const { label, description, preview } = o;
+      if (typeof label !== "string" || label.length === 0) return null;
+      if (typeof description !== "string" || description.length === 0) {
+        return null;
+      }
+      if (preview !== undefined && typeof preview !== "string") return null;
+      const entry: NeedsInputOption = { label, description };
+      if (preview !== undefined) entry.preview = preview;
+      opts.push(entry);
+    }
+    out.push({ question, header, multiSelect, options: opts });
+  }
+  return { questions: out };
+}
+
 /**
  * Project a RunTaskResult into the wire-shape returned by the MCP tool. Pure:
  * deterministic given inputs.
@@ -514,6 +691,7 @@ export function buildTaskPayload(
         output: truncateUtf8(to.output, TOOL_OUTPUT_MAX_BYTES),
       }));
     }
+    if (result.needsInput) payload.needsInput = result.needsInput;
   } else {
     if (result.error !== undefined) payload.error = result.error;
     if (result.errorKind !== undefined) payload.errorKind = result.errorKind;

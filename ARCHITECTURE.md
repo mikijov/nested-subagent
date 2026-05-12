@@ -306,6 +306,24 @@ The plugin does not pass `--fallback-model` to the spawned `claude -p` and expos
 
 **If this ever changes.** Add `fallbackModel` as an opt-in parameter with no default. Do not bake a fallback into `buildClaudeArgs`.
 
+### Operator escape hatch (`askOperator`)
+
+Headless subagents cannot reach an operator. `AskUserQuestion` is not routed back through the parent's MCP transport — calling it from a `claude -p` process would either fail or block, neither of which is useful.
+
+`askOperator: true` reroutes that need into the result channel. The plugin auto-appends a short protocol snippet to `--append-system-prompt` instructing the subagent: do not call `AskUserQuestion`; if you need operator input, emit a sentinel-delimited JSON block in your final message and stop. The plugin parses that block on the way out and surfaces it as `needsInput` on the response. The parent — which does have `AskUserQuestion` — asks the operator, then re-invokes `Task` with `resume: <sessionId>` and a freeform prompt containing the answers. Session persistence is auto-promoted (`computeEffectivePersist` treats `askOperator` as implying persistence) so the resume target exists without the caller having to opt into persistence redundantly.
+
+**Why text sentinels rather than a richer channel.**
+
+- The `result` event's `result` field is the only text path back to the parent that survives every layer of the streaming pipeline. New MCP message types would require client coordination.
+- Text sentinels are model-friendly: subagents already emit a final message, and pinning a structured block onto that habit costs almost nothing.
+- Parsing failures are recoverable. A malformed block becomes a no-op (no `needsInput`); the parent sees the raw text in `result` and can retry or surface the issue. There is no partial state to clean up.
+
+**Why the shape mirrors native `AskUserQuestion`.** The parent's job after seeing `needsInput` is to call its own `AskUserQuestion`. Matching the schema (1–4 questions, 2–4 options each, optional `preview` per option, `header` ≤ 12 chars) means the parent passes `needsInput.questions` straight through with no translation.
+
+**Multi-round dialogues compose.** A resumed subagent that still needs more clarification can emit another sentinel block, and the cycle repeats. Each round is one `Task` call; sessions persist across all of them.
+
+**Failure semantics.** Parsing only runs when both `success: true` and `askOperator: true`. A subagent that crashes mid-emission, times out, or hits `maxTurns` ends as a normal failure with no `needsInput` — partial sentinel text is not extracted. Subagents that emit the sentinel without the caller opting in (i.e. `askOperator: false`) are ignored — opt-in detection avoids accidental triggering from coincidental content.
+
 ---
 
 ## Key Architectural Insight

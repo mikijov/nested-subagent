@@ -168,7 +168,7 @@ function slugify(input) {
 	return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 const captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace : (..._args) => {};
-function isObject(data) {
+function isObject$1(data) {
 	return typeof data === "object" && data !== null && !Array.isArray(data);
 }
 const allowsEval = /* @__PURE__ */ cached(() => {
@@ -182,12 +182,12 @@ const allowsEval = /* @__PURE__ */ cached(() => {
 	}
 });
 function isPlainObject$1(o) {
-	if (isObject(o) === false) return false;
+	if (isObject$1(o) === false) return false;
 	const ctor = o.constructor;
 	if (ctor === void 0) return true;
 	if (typeof ctor !== "function") return true;
 	const prot = ctor.prototype;
-	if (isObject(prot) === false) return false;
+	if (isObject$1(prot) === false) return false;
 	if (Object.prototype.hasOwnProperty.call(prot, "isPrototypeOf") === false) return false;
 	return true;
 }
@@ -203,7 +203,7 @@ const propertyKeyTypes = /* @__PURE__ */ new Set([
 	"number",
 	"symbol"
 ]);
-function escapeRegex(str) {
+function escapeRegex$1(str) {
 	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
@@ -947,7 +947,7 @@ const $ZodCheckUpperCase = /* @__PURE__ */ $constructor("$ZodCheckUpperCase", (i
 });
 const $ZodCheckIncludes = /* @__PURE__ */ $constructor("$ZodCheckIncludes", (inst, def) => {
 	$ZodCheck.init(inst, def);
-	const escapedRegex = escapeRegex(def.includes);
+	const escapedRegex = escapeRegex$1(def.includes);
 	const pattern = new RegExp(typeof def.position === "number" ? `^.{${def.position}}${escapedRegex}` : escapedRegex);
 	def.pattern = pattern;
 	inst._zod.onattach.push((inst$1) => {
@@ -970,7 +970,7 @@ const $ZodCheckIncludes = /* @__PURE__ */ $constructor("$ZodCheckIncludes", (ins
 });
 const $ZodCheckStartsWith = /* @__PURE__ */ $constructor("$ZodCheckStartsWith", (inst, def) => {
 	$ZodCheck.init(inst, def);
-	const pattern = /* @__PURE__ */ new RegExp(`^${escapeRegex(def.prefix)}.*`);
+	const pattern = /* @__PURE__ */ new RegExp(`^${escapeRegex$1(def.prefix)}.*`);
 	def.pattern ?? (def.pattern = pattern);
 	inst._zod.onattach.push((inst$1) => {
 		const bag = inst$1._zod.bag;
@@ -992,7 +992,7 @@ const $ZodCheckStartsWith = /* @__PURE__ */ $constructor("$ZodCheckStartsWith", 
 });
 const $ZodCheckEndsWith = /* @__PURE__ */ $constructor("$ZodCheckEndsWith", (inst, def) => {
 	$ZodCheck.init(inst, def);
-	const pattern = /* @__PURE__ */ new RegExp(`.*${escapeRegex(def.suffix)}$`);
+	const pattern = /* @__PURE__ */ new RegExp(`.*${escapeRegex$1(def.suffix)}$`);
 	def.pattern ?? (def.pattern = pattern);
 	inst._zod.onattach.push((inst$1) => {
 		const bag = inst$1._zod.bag;
@@ -1623,13 +1623,13 @@ const $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
 		}
 		return propValues;
 	});
-	const isObject$1 = isObject;
+	const isObject$2 = isObject$1;
 	const catchall = def.catchall;
 	let value;
 	inst._zod.parse = (payload, ctx) => {
 		value ?? (value = _normalized.value);
 		const input = payload.value;
-		if (!isObject$1(input)) {
+		if (!isObject$2(input)) {
 			payload.issues.push({
 				expected: "object",
 				code: "invalid_type",
@@ -1752,7 +1752,7 @@ const $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) 
 		return (payload, ctx) => fn(shape, payload, ctx);
 	};
 	let fastpass;
-	const isObject$1 = isObject;
+	const isObject$2 = isObject$1;
 	const jit = !globalConfig.jitless;
 	const allowsEval$1 = allowsEval;
 	const fastEnabled = jit && allowsEval$1.value;
@@ -1761,7 +1761,7 @@ const $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) 
 	inst._zod.parse = (payload, ctx) => {
 		value ?? (value = _normalized.value);
 		const input = payload.value;
-		if (!isObject$1(input)) {
+		if (!isObject$2(input)) {
 			payload.issues.push({
 				expected: "object",
 				code: "invalid_type",
@@ -1865,7 +1865,7 @@ const $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUn
 	});
 	inst._zod.parse = (payload, ctx) => {
 		const input = payload.value;
-		if (!isObject(input)) {
+		if (!isObject$1(input)) {
 			payload.issues.push({
 				code: "invalid_type",
 				expected: "object",
@@ -2103,7 +2103,7 @@ const $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
 	const values = getEnumValues(def.entries);
 	const valuesSet = new Set(values);
 	inst._zod.values = valuesSet;
-	inst._zod.pattern = /* @__PURE__ */ new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
+	inst._zod.pattern = /* @__PURE__ */ new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex$1(o) : o.toString()).join("|")})$`);
 	inst._zod.parse = (payload, _ctx) => {
 		const input = payload.value;
 		if (valuesSet.has(input)) return payload;
@@ -2121,7 +2121,7 @@ const $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
 	if (def.values.length === 0) throw new Error("Cannot create literal schema with no valid values");
 	const values = new Set(def.values);
 	inst._zod.values = values;
-	inst._zod.pattern = /* @__PURE__ */ new RegExp(`^(${def.values.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$`);
+	inst._zod.pattern = /* @__PURE__ */ new RegExp(`^(${def.values.map((o) => typeof o === "string" ? escapeRegex$1(o) : o ? escapeRegex$1(o.toString()) : String(o)).join("|")})$`);
 	inst._zod.parse = (payload, _ctx) => {
 		const input = payload.value;
 		if (values.has(input)) return payload;
@@ -13711,7 +13711,7 @@ var StdioServerTransport = class {
 //#region src/session.ts
 function computeEffectivePersist(input) {
 	if (input.persistSession !== void 0) return input.persistSession;
-	return Boolean(input.resume || input.continueRecent || input.forkSession || input.sessionId);
+	return Boolean(input.resume || input.continueRecent || input.forkSession || input.sessionId || input.askOperator);
 }
 /**
 * Returns an error message string if the combination of session params is
@@ -13719,6 +13719,7 @@ function computeEffectivePersist(input) {
 * message verbatim.
 */
 function validateSessionParams(input) {
+	if (input.askOperator && input.persistSession === false) return "askOperator=true requires a persisted session (the parent must be able to resume to deliver operator answers); persistSession=false is incompatible";
 	if (input.resume && input.continueRecent) return "resume and continueRecent are mutually exclusive";
 	const hasResumeSource = Boolean(input.resume || input.continueRecent);
 	if (input.persistSession === false && (hasResumeSource || input.forkSession || input.sessionId)) return "persistSession=false conflicts with session lifecycle params (resume/continueRecent/sessionId/forkSession require a persisted session)";
@@ -13741,13 +13742,29 @@ const WRITE_TOOLS = [
 	"NotebookEdit"
 ];
 const READ_ONLY_FILES_PROMPT = "You are running with file modification disabled. You may read files and run analysis commands, but you must not create, modify, or delete files using Write, Edit, or NotebookEdit. Bash redirects, sed -i, tee, and similar shell-based file modification are also off-limits even though they are not hard-blocked.";
+const ASK_OPERATOR_SENTINEL_OPEN = "<<<NEED_OPERATOR_INPUT>>>";
+const ASK_OPERATOR_SENTINEL_CLOSE = "<<<END_OPERATOR_INPUT>>>";
+const ASK_OPERATOR_MIN_QUESTIONS = 1;
+const ASK_OPERATOR_MAX_QUESTIONS = 4;
+const ASK_OPERATOR_MIN_OPTIONS = 2;
+const ASK_OPERATOR_MAX_OPTIONS = 4;
+const ASK_OPERATOR_MAX_HEADER_CHARS = 12;
+const ASK_OPERATOR_PROMPT = `OPERATOR ESCAPE HATCH — READ CAREFULLY.
+
+You are running in headless mode. The AskUserQuestion tool is NOT available — calling it will fail. If you need operator input to proceed, do NOT guess and do NOT call any tool. Instead, end your work and emit a single block in your FINAL message, exactly in this form:
+
+${ASK_OPERATOR_SENTINEL_OPEN}
+{"questions":[{"question":"<one sentence asking what you need>","header":"<≤12 chars>","multiSelect":false,"options":[{"label":"<short label>","description":"<≤2 sentences>"},{"label":"<short label>","description":"<≤2 sentences>"}]}]}
+${ASK_OPERATOR_SENTINEL_CLOSE}
+
+Rules: the block MUST be valid JSON between the sentinels; you may include 1 to 4 questions and each must have 2 to 4 options; \`multiSelect\` is a boolean; \`header\` ≤ 12 chars; \`preview\` on an option is optional. Emit NOTHING after the closing sentinel — the orchestrator stops reading there. If you do NOT need operator input, complete the task normally and never emit the sentinels.`;
 /**
 * Build the full claude-CLI argv (excluding the `claude` exe itself) for a
 * Task input. Pure: no env reads, no spawn. The plugin-root propagation is
 * applied here too so the bundled bin can be tested end-to-end.
 */
 function buildClaudeArgs(input, env = {}) {
-	const { prompt, model = "opus", allowWrite = false, permissionMode, dangerouslySkipPermissions = false, effort = "xhigh", systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession } = input;
+	const { prompt, model = "opus", allowWrite = false, permissionMode, dangerouslySkipPermissions = false, effort = "xhigh", systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession, askOperator = false } = input;
 	const args = [
 		"-p",
 		prompt,
@@ -13761,7 +13778,11 @@ function buildClaudeArgs(input, env = {}) {
 	if (dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
 	else args.push("--permission-mode", permissionMode ?? "auto");
 	if (systemPrompt) args.push("--system-prompt", systemPrompt);
-	const mergedAppendSP = [appendSystemPrompt, allowWrite ? null : READ_ONLY_FILES_PROMPT].filter((s) => Boolean(s)).join("\n\n");
+	const mergedAppendSP = [
+		appendSystemPrompt,
+		allowWrite ? null : READ_ONLY_FILES_PROMPT,
+		askOperator ? ASK_OPERATOR_PROMPT : null
+	].filter((s) => Boolean(s)).join("\n\n");
 	if (mergedAppendSP) args.push("--append-system-prompt", mergedAppendSP);
 	if (allowedTools && allowedTools.length > 0) args.push("--allowed-tools", ...allowedTools);
 	const effectiveDisallowed = new Set(disallowedTools ?? []);
@@ -13880,6 +13901,105 @@ function handleUserContent(message, toolUseResult, state) {
 		});
 	}
 }
+function countOccurrences(haystack, needle) {
+	if (!needle) return 0;
+	let count = 0;
+	let from = 0;
+	while (true) {
+		const i = haystack.indexOf(needle, from);
+		if (i < 0) return count;
+		count++;
+		from = i + needle.length;
+	}
+}
+function escapeRegex(s) {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function isObject(x) {
+	return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+const ASK_OPERATOR_BODY_RE = /* @__PURE__ */ new RegExp(`${escapeRegex(ASK_OPERATOR_SENTINEL_OPEN)}([\\s\\S]*?)${escapeRegex(ASK_OPERATOR_SENTINEL_CLOSE)}`);
+/**
+* Extract a structured operator-input request from the subagent's final
+* result text. Returns null on any failure (no sentinels, ambiguous sentinel
+* count, malformed JSON, shape violations, empty body). Never throws.
+*
+* Detection rules:
+* - Exactly one open AND one close sentinel. Zero pairs → null (normal exit).
+*   Multiple opens or multiple closes → null (ambiguous; we do not pick).
+* - JSON between the sentinels parses cleanly (optional ```/```json fence is
+*   stripped first).
+* - Strict shape validation: 1–4 questions, 2–4 options per question,
+*   non-empty strings, multiSelect strictly boolean, header ≤ 12 chars.
+*/
+function parseNeedsInput(text) {
+	if (!text) return null;
+	const openCount = countOccurrences(text, ASK_OPERATOR_SENTINEL_OPEN);
+	const closeCount = countOccurrences(text, ASK_OPERATOR_SENTINEL_CLOSE);
+	if (openCount === 0 && closeCount === 0) return null;
+	if (openCount !== 1 || closeCount !== 1) return null;
+	const m = ASK_OPERATOR_BODY_RE.exec(text);
+	if (!m) return null;
+	let body = m[1].trim();
+	if (!body) return null;
+	if (body.startsWith("```")) {
+		const firstNewline = body.indexOf("\n");
+		body = firstNewline >= 0 ? body.slice(firstNewline + 1) : body.slice(3);
+		if (body.endsWith("```")) body = body.slice(0, -3);
+		body = body.trim();
+		if (!body) return null;
+	}
+	let parsed;
+	try {
+		parsed = JSON.parse(body);
+	} catch {
+		return null;
+	}
+	return validateNeedsInputShape(parsed);
+}
+/**
+* Strict, total shape validator. Pure; never throws. Returns null on the first
+* rule violation rather than collecting errors — failures are silent in this
+* pipeline (the caller falls through to a normal success with no needsInput).
+*/
+function validateNeedsInputShape(value) {
+	if (!isObject(value)) return null;
+	const { questions } = value;
+	if (!Array.isArray(questions)) return null;
+	if (questions.length < ASK_OPERATOR_MIN_QUESTIONS || questions.length > ASK_OPERATOR_MAX_QUESTIONS) return null;
+	const out = [];
+	for (const q of questions) {
+		if (!isObject(q)) return null;
+		const { question, header, multiSelect, options } = q;
+		if (typeof question !== "string" || question.length === 0) return null;
+		if (typeof header !== "string" || header.length === 0) return null;
+		if (header.length > ASK_OPERATOR_MAX_HEADER_CHARS) return null;
+		if (typeof multiSelect !== "boolean") return null;
+		if (!Array.isArray(options)) return null;
+		if (options.length < ASK_OPERATOR_MIN_OPTIONS || options.length > ASK_OPERATOR_MAX_OPTIONS) return null;
+		const opts = [];
+		for (const o of options) {
+			if (!isObject(o)) return null;
+			const { label, description, preview } = o;
+			if (typeof label !== "string" || label.length === 0) return null;
+			if (typeof description !== "string" || description.length === 0) return null;
+			if (preview !== void 0 && typeof preview !== "string") return null;
+			const entry = {
+				label,
+				description
+			};
+			if (preview !== void 0) entry.preview = preview;
+			opts.push(entry);
+		}
+		out.push({
+			question,
+			header,
+			multiSelect,
+			options: opts
+		});
+	}
+	return { questions: out };
+}
 /**
 * Project a RunTaskResult into the wire-shape returned by the MCP tool. Pure:
 * deterministic given inputs.
@@ -13906,6 +14026,7 @@ function buildTaskPayload(result, includeToolOutputs, includeThinking) {
 			tool: to.tool,
 			output: truncateUtf8(to.output, TOOL_OUTPUT_MAX_BYTES)
 		}));
+		if (result.needsInput) payload.needsInput = result.needsInput;
 	} else {
 		if (result.error !== void 0) payload.error = result.error;
 		if (result.errorKind !== void 0) payload.errorKind = result.errorKind;
@@ -14097,6 +14218,11 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 				type: "boolean",
 				default: false,
 				description: "If true, append the subagent's extended-thinking content to the response under `thinkingBlocks` (each entry truncated to 16 KB). Default false — the parent receives only `stats.thinkingBlocks` count, since intermediate reasoning is what subagent isolation absorbs. Two block shapes are counted but excluded from the surfaced array: redacted thinking (encrypted blob the parent can't decrypt) and empty-text thinking (Opus 4.x sometimes emits a signed-but-empty `{thinking: \"\"}` block when extended thinking is enabled but the model has no reasoning text for that turn). The result: `stats.thinkingBlocks >= thinkingBlocks.length`."
+			},
+			askOperator: {
+				type: "boolean",
+				default: false,
+				description: "Operator escape hatch. When true, instructs the subagent (via --append-system-prompt) to emit a sentinel-wrapped JSON block in its final message instead of calling AskUserQuestion (which is unavailable in headless mode); the plugin parses that block and returns it as `needsInput`. The parent should call its own AskUserQuestion with `needsInput.questions`, then re-invoke Task with `resume: <sessionId>` and a prompt containing the answers. Implies persistSession=true. Detection is opt-in: sentinels emitted while askOperator=false are ignored. See ARCHITECTURE.md → Operator escape hatch for rationale."
 			}
 		},
 		required: ["prompt"]
@@ -14191,6 +14317,47 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 					properties: { text: { type: "string" } },
 					required: ["text"]
 				}
+			},
+			needsInput: {
+				type: "object",
+				description: "Present only when askOperator=true was passed AND the subagent emitted a valid sentinel-wrapped operator-input request in its final message. Mirrors the native AskUserQuestion input shape so the parent can pass `questions` straight through. The parent should call AskUserQuestion with these questions, then call Task again with `resume: <sessionId>` and a prompt containing the operator's answers.",
+				properties: { questions: {
+					type: "array",
+					minItems: 1,
+					maxItems: 4,
+					items: {
+						type: "object",
+						properties: {
+							question: { type: "string" },
+							header: {
+								type: "string",
+								maxLength: 12
+							},
+							multiSelect: { type: "boolean" },
+							options: {
+								type: "array",
+								minItems: 2,
+								maxItems: 4,
+								items: {
+									type: "object",
+									properties: {
+										label: { type: "string" },
+										description: { type: "string" },
+										preview: { type: "string" }
+									},
+									required: ["label", "description"]
+								}
+							}
+						},
+						required: [
+							"question",
+							"header",
+							"multiSelect",
+							"options"
+						]
+					}
+				} },
+				required: ["questions"]
 			}
 		},
 		required: ["ok", "taskId"]
@@ -14423,8 +14590,10 @@ async function runTask(input, progressToken) {
 						message: `Done (${state.toolUseCount} tool uses, ${duration$2}ms, $${lastResult.total_cost_usd?.toFixed(4) ?? "?"})`
 					}
 				});
+				const successFlag = !lastResult.is_error;
+				const needsInput = successFlag && input.askOperator ? parseNeedsInput(lastResult.result) ?? void 0 : void 0;
 				resolve({
-					success: !lastResult.is_error,
+					success: successFlag,
 					result: lastResult.result,
 					errorKind: lastResult.is_error ? "exit_nonzero" : void 0,
 					toolUseCount: state.toolUseCount,
@@ -14438,7 +14607,8 @@ async function runTask(input, progressToken) {
 					thinkingBlocks: state.thinkingBlocks,
 					sessionId: capturedSessionId,
 					persisted,
-					taskId
+					taskId,
+					needsInput
 				});
 			} else if (code === 0) resolve({
 				success: true,

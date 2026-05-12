@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASK_OPERATOR_PROMPT,
+  ASK_OPERATOR_SENTINEL_OPEN,
   buildClaudeArgs,
   READ_ONLY_FILES_PROMPT,
   validatePermissionParams,
@@ -247,6 +249,56 @@ describe("buildClaudeArgs", () => {
       const args = buildClaudeArgs({ ...base, allowWrite: true });
       expect(flagValue(args, "--permission-mode")).toBe("auto");
       expect(hasFlag(args, "--dangerously-skip-permissions")).toBe(false);
+    });
+  });
+
+  describe("askOperator", () => {
+    it("true: appends the operator-escape prompt to --append-system-prompt", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        askOperator: true,
+        allowWrite: true,
+      });
+      const sp = flagValue(args, "--append-system-prompt") ?? "";
+      expect(sp).toContain(ASK_OPERATOR_SENTINEL_OPEN);
+      expect(sp).toBe(ASK_OPERATOR_PROMPT);
+    });
+
+    it("true + allowWrite=false: read-only first, ask-operator last, joined by \\n\\n", () => {
+      const args = buildClaudeArgs({ ...base, askOperator: true });
+      const sp = flagValue(args, "--append-system-prompt") ?? "";
+      expect(sp).toBe(`${READ_ONLY_FILES_PROMPT}\n\n${ASK_OPERATOR_PROMPT}`);
+    });
+
+    it("true + caller appendSystemPrompt: order is caller → read-only → ask-operator", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        askOperator: true,
+        appendSystemPrompt: "caller-note",
+      });
+      const sp = flagValue(args, "--append-system-prompt") ?? "";
+      expect(sp).toBe(
+        `caller-note\n\n${READ_ONLY_FILES_PROMPT}\n\n${ASK_OPERATOR_PROMPT}`,
+      );
+    });
+
+    it("false (default): does NOT append the operator prompt", () => {
+      const args = buildClaudeArgs({ ...base, allowWrite: true });
+      expect(hasFlag(args, "--append-system-prompt")).toBe(false);
+    });
+
+    it("true: suppresses --no-session-persistence (auto-persist)", () => {
+      const args = buildClaudeArgs({ ...base, askOperator: true });
+      expect(hasFlag(args, "--no-session-persistence")).toBe(false);
+    });
+
+    it("true + explicit persistSession=true: still no --no-session-persistence", () => {
+      const args = buildClaudeArgs({
+        ...base,
+        askOperator: true,
+        persistSession: true,
+      });
+      expect(hasFlag(args, "--no-session-persistence")).toBe(false);
     });
   });
 

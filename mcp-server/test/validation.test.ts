@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { validateSessionParams, type TaskInput } from "../src/session.js";
+import {
+  computeEffectivePersist,
+  validateSessionParams,
+  type TaskInput,
+} from "../src/session.js";
 
 const base: TaskInput = { prompt: "hi" };
 
@@ -72,6 +76,15 @@ describe("validateSessionParams — rejections", () => {
     });
     expect(err).toMatch(/sessionId combined with resume\/continueRecent requires forkSession/);
   });
+
+  it("rejects askOperator=true with explicit persistSession=false", () => {
+    const err = validateSessionParams({
+      ...base,
+      askOperator: true,
+      persistSession: false,
+    });
+    expect(err).toMatch(/askOperator=true requires a persisted session/);
+  });
 });
 
 describe("validateSessionParams — acceptances", () => {
@@ -114,5 +127,50 @@ describe("validateSessionParams — acceptances", () => {
     expect(
       validateSessionParams({ ...base, persistSession: true }),
     ).toBeNull();
+  });
+
+  it("accepts askOperator=true alone (persistence is auto-promoted)", () => {
+    expect(validateSessionParams({ ...base, askOperator: true })).toBeNull();
+  });
+
+  it("accepts askOperator=true + resume", () => {
+    expect(
+      validateSessionParams({ ...base, askOperator: true, resume: "u-1" }),
+    ).toBeNull();
+  });
+
+  it("accepts askOperator=true + explicit persistSession=true", () => {
+    expect(
+      validateSessionParams({
+        ...base,
+        askOperator: true,
+        persistSession: true,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("computeEffectivePersist — askOperator", () => {
+  it("askOperator=true alone implies persistence", () => {
+    expect(
+      computeEffectivePersist({ prompt: "x", askOperator: true }),
+    ).toBe(true);
+  });
+
+  it("askOperator=true with explicit persistSession=true returns true", () => {
+    expect(
+      computeEffectivePersist({
+        prompt: "x",
+        askOperator: true,
+        persistSession: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("askOperator=false (or absent) does not imply persistence on its own", () => {
+    expect(computeEffectivePersist({ prompt: "x" })).toBe(false);
+    expect(
+      computeEffectivePersist({ prompt: "x", askOperator: false }),
+    ).toBe(false);
   });
 });
