@@ -14038,7 +14038,7 @@ function buildTaskPayload(result, includeToolOutputs, includeThinking) {
 
 //#endregion
 //#region package.json
-var version = "3.0.0";
+var version = "3.1.0";
 
 //#endregion
 //#region src/index.ts

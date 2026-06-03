@@ -1,6 +1,6 @@
 {
   "name": "nested-subagent-mcp",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "MCP server that enables unlimited nested subagents by spawning fresh Claude processes",
   "type": "module",
   "main": "dist/index.mjs",
