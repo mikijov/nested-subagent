@@ -229,6 +229,46 @@ describe("buildTaskPayload — thinking surfacing", () => {
   });
 });
 
+describe("buildTaskPayload — model surfacing", () => {
+  const baseSuccess: RunTaskResult = {
+    success: true,
+    result: "ok",
+    taskId: "task-test",
+    toolUseCount: 0,
+    duration: 100,
+  };
+
+  it("surfaces the resolved model as stats.model on success", () => {
+    const payload = buildTaskPayload(
+      { ...baseSuccess, model: "claude-opus-4-8" },
+      false,
+      false,
+    );
+    expect(payload.stats?.model).toBe("claude-opus-4-8");
+  });
+
+  it("surfaces stats.model even on a failed result", () => {
+    const payload = buildTaskPayload(
+      {
+        success: false,
+        error: "boom",
+        errorKind: "exit_nonzero",
+        taskId: "task-test",
+        model: "claude-haiku-4-5",
+      },
+      false,
+      false,
+    );
+    expect(payload.ok).toBe(false);
+    expect(payload.stats?.model).toBe("claude-haiku-4-5");
+  });
+
+  it("omits stats.model when the model was never captured", () => {
+    const payload = buildTaskPayload(baseSuccess, false, false);
+    expect(payload.stats?.model).toBeUndefined();
+  });
+});
+
 describe("buildTaskPayload — needsInput threading", () => {
   const baseSuccess: RunTaskResult = {
     success: true,

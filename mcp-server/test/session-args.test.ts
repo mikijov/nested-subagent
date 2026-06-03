@@ -48,7 +48,23 @@ describe("buildClaudeArgs", () => {
     expect(args).toContain("--output-format");
     expect(args).toContain("stream-json");
     expect(args).toContain("--verbose");
-    expect(flagValue(args, "--model")).toBe("opus");
+    expect(flagValue(args, "--model")).toBe("opus[1m]");
+  });
+
+  it("passes any model string through to --model verbatim", () => {
+    // The plugin does not validate the model; whatever the caller supplies is
+    // handed straight to the CLI (aliases, 1M variants, full ids, future models).
+    for (const model of [
+      "opus",
+      "sonnet[1m]",
+      "haiku",
+      "claude-opus-4-8",
+      "claude-sonnet-4-6[1m]",
+      "some-future-model",
+    ]) {
+      const args = buildClaudeArgs({ prompt: "x", model });
+      expect(flagValue(args, "--model")).toBe(model);
+    }
   });
 
   it("resume only: --resume <id>, no --no-session-persistence", () => {

@@ -40,7 +40,9 @@ export interface ClaudeResult {
 
 export interface ClaudeOptions {
   prompt: string;
-  model?: "sonnet" | "opus" | "haiku";
+  // Aliases, full ids, and 1M variants (opus[1m]) are all accepted verbatim; the
+  // listed literals are editor hints only — `(string & {})` keeps the set open.
+  model?: "opus[1m]" | "opus" | "sonnet" | "sonnet[1m]" | "haiku" | (string & {});
   maxTurns?: number;
   timeout?: number;
   workingDir?: string;
