@@ -94,6 +94,10 @@ interface StreamMessage {
   subtype?: string;
   message?: {
     content: Array<AssistantContentBlock | UserToolResultBlock>;
+    // Present on assistant events — the resolved model the subagent ran (e.g.
+    // "claude-opus-4-8"). The CLI strips any [1m] suffix before the API call,
+    // so this reports the base id, not the 1M flag.
+    model?: string;
   };
   session_id?: string;
   uuid?: string;
@@ -129,7 +133,7 @@ Session chaining: pass \`persistSession: true\` (or \`resume\`/\`continueRecent\
 
 Abort: pass an explicit \`taskId\` (or read the auto-generated one from the first progress notification) and call the sibling \`AbortTask\` tool.
 
-Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persistSession=false, timeout=600000ms. When allowWrite=false (the default), Write/Edit/NotebookEdit are added to --disallowed-tools and the subagent is told it is in read-only-files mode.`,
+Defaults: model=opus[1m], effort=xhigh, allowWrite=false, permissionMode=auto, persistSession=false, timeout=600000ms. When allowWrite=false (the default), Write/Edit/NotebookEdit are added to --disallowed-tools and the subagent is told it is in read-only-files mode.`,
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -139,9 +143,10 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
       },
       model: {
         type: "string",
-        enum: ["sonnet", "opus", "haiku"],
-        default: "opus",
-        description: "Model to use (default: opus)",
+        default: "opus[1m]",
+        examples: ["opus[1m]", "opus", "sonnet", "sonnet[1m]", "haiku", "claude-opus-4-8"],
+        description:
+          "Model for the subagent. Accepts an alias (opus/sonnet/haiku), a full model id (e.g. claude-opus-4-8), or a 1M-context variant by appending [1m] (Opus/Sonnet only — Haiku has no 1M context). Any value the installed `claude` CLI accepts is allowed, including models released after this plugin. Passed verbatim to --model. Default: opus[1m] (latest Opus with 1M context).",
       },
       effort: {
         type: "string",
@@ -297,6 +302,11 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
         type: "object",
         properties: {
           toolUseCount: { type: "integer" },
+          model: {
+            type: "string",
+            description:
+              "The model the subagent actually ran (e.g. claude-opus-4-8). Reported by the CLI without the [1m] suffix, which the API strips before the request.",
+          },
           durationMs: { type: "integer" },
           tokens: {
             type: "integer",
@@ -512,6 +522,7 @@ async function runTask(
   return new Promise((resolve) => {
     let lastResult: StreamMessage | null = null;
     let capturedSessionId: string | undefined;
+    let capturedModel: string | undefined;
     let timedOut = false;
 
     log(`[${taskId}] CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || '(not set)'}`);
@@ -578,6 +589,9 @@ async function runTask(
             break;
 
           case "assistant":
+            if (!capturedModel && typeof msg.message?.model === "string" && msg.message.model) {
+              capturedModel = msg.message.model;
+            }
             if (msg.message?.content) {
               const { progressMessages, unknownBlockTypes } =
                 handleAssistantContent(msg.message.content, state);
@@ -666,6 +680,7 @@ async function runTask(
           errorKind: "timeout",
           taskId,
           sessionId: capturedSessionId,
+          model: capturedModel,
           persisted,
           toolUseCount: state.toolUseCount,
           duration,
@@ -718,6 +733,7 @@ async function runTask(
           thinkingBlockCount: state.thinkingBlockCount,
           thinkingBlocks: state.thinkingBlocks,
           sessionId: capturedSessionId,
+          model: capturedModel,
           persisted,
           taskId,
           needsInput,
@@ -734,6 +750,7 @@ async function runTask(
           thinkingBlockCount: state.thinkingBlockCount,
           thinkingBlocks: state.thinkingBlocks,
           sessionId: capturedSessionId,
+          model: capturedModel,
           persisted,
           taskId,
         });
@@ -748,6 +765,7 @@ async function runTask(
             : stderr.trim() || `Process exited with code ${code}`,
           errorKind: aborted ? "aborted" : "exit_nonzero",
           sessionId: capturedSessionId,
+          model: capturedModel,
           persisted,
           toolUseCount: state.toolUseCount,
           duration,

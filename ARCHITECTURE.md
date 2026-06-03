@@ -181,7 +181,7 @@ The MCP server (`mcp-server/src/index.ts`) works by:
   prompt: string,              // The task for the agent to perform
 
   // Optional configuration
-  model?: "sonnet" | "opus" | "haiku",  // Default: "opus"
+  model?: string,              // Default: "opus[1m]". Open-ended (passed verbatim to --model): alias (opus/sonnet/haiku), full id (claude-opus-4-8), or 1M variant via [1m] suffix (Opus/Sonnet only)
   effort?: "low" | "medium" | "high" | "xhigh" | "max",  // Default: "xhigh"
   workingDir?: string,
   timeout?: number,            // Default: 600000 (10 min)
@@ -295,7 +295,9 @@ function log(message: string) {
 
 The plugin does not pass `--fallback-model` to the spawned `claude -p` and exposes no `fallbackModel` parameter. Anthropic provider-side overloads surface as task failures (`ok: false`, `errorKind: "exit_nonzero"`) after the CLI's own bounded retry/backoff loop completes.
 
-**Why.** The defaults are `model: opus`, `effort: xhigh`. A silent fallback to a smaller model on overload would degrade quality mid-run, and the `result` event's `usage` block does not echo which model actually executed — so the parent agent has no way to detect that degradation happened. For a workflow that exists *because* you want full Opus reasoning at every level of nesting, swapping in Sonnet would defeat the point.
+**Why.** The defaults are `model: opus[1m]`, `effort: xhigh` — latest Opus with the 1M-token context window at every level of nesting. A silent fallback to a smaller model on overload would degrade quality mid-run, and the `result` event's `usage` block does not echo which model actually executed — so the parent agent has no way to detect that degradation happened. For a workflow that exists *because* you want full Opus reasoning at every level of nesting, swapping in Sonnet would defeat the point.
+
+The plugin *does* capture the resolved model from the first `assistant` event into `stats.model` (e.g. `claude-opus-4-8`), which gives the parent a confirmation of which model the spawn started on. This is not a substitute for fallback detection: it reflects the model the run *started* with, not a mid-run provider downgrade, and the CLI strips the `[1m]` suffix before the API call, so `stats.model` reports the base id and cannot confirm whether 1M context was actually active.
 
 **Implications.**
 

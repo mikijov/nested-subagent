@@ -7,7 +7,10 @@
 
 export interface TaskInput {
   prompt: string;
-  model?: "sonnet" | "opus" | "haiku";
+  // Alias (opus/sonnet/haiku), full id (claude-opus-4-8), or 1M variant (append
+  // [1m], Opus/Sonnet only). Any string the installed claude CLI accepts works;
+  // the listed literals are just editor hints — `(string & {})` keeps the set open.
+  model?: "opus[1m]" | "opus" | "sonnet" | "sonnet[1m]" | "haiku" | (string & {});
   workingDir?: string;
   timeout?: number;
   allowWrite?: boolean;
@@ -172,7 +175,7 @@ export function buildClaudeArgs(
 ): string[] {
   const {
     prompt,
-    model = "opus",
+    model = "opus[1m]",
     allowWrite = false,
     permissionMode,
     dangerouslySkipPermissions = false,
@@ -339,6 +342,9 @@ export interface RunTaskResult {
   thinkingBlockCount?: number;
   thinkingBlocks?: ThinkingBlock[];
   sessionId?: string;
+  // Resolved model the subagent ran, captured from assistant stream events
+  // (e.g. "claude-opus-4-8" — no [1m] suffix; the CLI strips it before the API).
+  model?: string;
   persisted?: boolean;
   taskId?: string;
   needsInput?: NeedsInput;
@@ -346,6 +352,7 @@ export interface RunTaskResult {
 
 export interface TaskStats {
   toolUseCount?: number;
+  model?: string;
   durationMs?: number;
   tokens?: number;
   cacheReadTokens?: number;
@@ -662,6 +669,7 @@ export function buildTaskPayload(
 ): TaskPayload {
   const stats: TaskStats = {};
   if (result.toolUseCount !== undefined) stats.toolUseCount = result.toolUseCount;
+  if (result.model !== undefined) stats.model = result.model;
   if (result.duration !== undefined) stats.durationMs = result.duration;
   if (result.tokens !== undefined) stats.tokens = result.tokens;
   if (result.cacheReadTokens !== undefined) {

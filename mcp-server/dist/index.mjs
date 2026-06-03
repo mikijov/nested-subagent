@@ -13764,7 +13764,7 @@ Rules: the block MUST be valid JSON between the sentinels; you may include 1 to 
 * applied here too so the bundled bin can be tested end-to-end.
 */
 function buildClaudeArgs(input, env = {}) {
-	const { prompt, model = "opus", allowWrite = false, permissionMode, dangerouslySkipPermissions = false, effort = "xhigh", systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession, askOperator = false } = input;
+	const { prompt, model = "opus[1m]", allowWrite = false, permissionMode, dangerouslySkipPermissions = false, effort = "xhigh", systemPrompt, appendSystemPrompt, allowedTools, disallowedTools, maxBudgetUsd, addDirs, sessionId, resume, continueRecent, forkSession, askOperator = false } = input;
 	const args = [
 		"-p",
 		prompt,
@@ -14007,6 +14007,7 @@ function validateNeedsInputShape(value) {
 function buildTaskPayload(result, includeToolOutputs, includeThinking) {
 	const stats = {};
 	if (result.toolUseCount !== void 0) stats.toolUseCount = result.toolUseCount;
+	if (result.model !== void 0) stats.model = result.model;
 	if (result.duration !== void 0) stats.durationMs = result.duration;
 	if (result.tokens !== void 0) stats.tokens = result.tokens;
 	if (result.cacheReadTokens !== void 0) stats.cacheReadTokens = result.cacheReadTokens;
@@ -14096,7 +14097,7 @@ Session chaining: pass \`persistSession: true\` (or \`resume\`/\`continueRecent\
 
 Abort: pass an explicit \`taskId\` (or read the auto-generated one from the first progress notification) and call the sibling \`AbortTask\` tool.
 
-Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persistSession=false, timeout=600000ms. When allowWrite=false (the default), Write/Edit/NotebookEdit are added to --disallowed-tools and the subagent is told it is in read-only-files mode.`,
+Defaults: model=opus[1m], effort=xhigh, allowWrite=false, permissionMode=auto, persistSession=false, timeout=600000ms. When allowWrite=false (the default), Write/Edit/NotebookEdit are added to --disallowed-tools and the subagent is told it is in read-only-files mode.`,
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -14106,13 +14107,16 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 			},
 			model: {
 				type: "string",
-				enum: [
-					"sonnet",
+				default: "opus[1m]",
+				examples: [
+					"opus[1m]",
 					"opus",
-					"haiku"
+					"sonnet",
+					"sonnet[1m]",
+					"haiku",
+					"claude-opus-4-8"
 				],
-				default: "opus",
-				description: "Model to use (default: opus)"
+				description: "Model for the subagent. Accepts an alias (opus/sonnet/haiku), a full model id (e.g. claude-opus-4-8), or a 1M-context variant by appending [1m] (Opus/Sonnet only — Haiku has no 1M context). Any value the installed `claude` CLI accepts is allowed, including models released after this plugin. Passed verbatim to --model. Default: opus[1m] (latest Opus with 1M context)."
 			},
 			effort: {
 				type: "string",
@@ -14269,6 +14273,10 @@ Defaults: model=opus, effort=xhigh, allowWrite=false, permissionMode=auto, persi
 				type: "object",
 				properties: {
 					toolUseCount: { type: "integer" },
+					model: {
+						type: "string",
+						description: "The model the subagent actually ran (e.g. claude-opus-4-8). Reported by the CLI without the [1m] suffix, which the API strips before the request."
+					},
 					durationMs: { type: "integer" },
 					tokens: {
 						type: "integer",
@@ -14450,6 +14458,7 @@ async function runTask(input, progressToken) {
 	return new Promise((resolve) => {
 		let lastResult = null;
 		let capturedSessionId;
+		let capturedModel;
 		let timedOut = false;
 		log(`[${taskId}] CLAUDE_PLUGIN_ROOT=${process.env.CLAUDE_PLUGIN_ROOT || "(not set)"}`);
 		log(`[${taskId}] Spawning claude with args: ${JSON.stringify(args)}`);
@@ -14500,6 +14509,7 @@ async function runTask(input, progressToken) {
 						});
 						break;
 					case "assistant":
+						if (!capturedModel && typeof msg.message?.model === "string" && msg.message.model) capturedModel = msg.message.model;
 						if (msg.message?.content) {
 							const { progressMessages, unknownBlockTypes } = handleAssistantContent(msg.message.content, state);
 							if (progressToken !== void 0) for (const message of progressMessages) server.notification({
@@ -14569,6 +14579,7 @@ async function runTask(input, progressToken) {
 					errorKind: "timeout",
 					taskId,
 					sessionId: capturedSessionId,
+					model: capturedModel,
 					persisted,
 					toolUseCount: state.toolUseCount,
 					duration: duration$2,
@@ -14606,6 +14617,7 @@ async function runTask(input, progressToken) {
 					thinkingBlockCount: state.thinkingBlockCount,
 					thinkingBlocks: state.thinkingBlocks,
 					sessionId: capturedSessionId,
+					model: capturedModel,
 					persisted,
 					taskId,
 					needsInput
@@ -14621,6 +14633,7 @@ async function runTask(input, progressToken) {
 				thinkingBlockCount: state.thinkingBlockCount,
 				thinkingBlocks: state.thinkingBlocks,
 				sessionId: capturedSessionId,
+				model: capturedModel,
 				persisted,
 				taskId
 			});
@@ -14631,6 +14644,7 @@ async function runTask(input, progressToken) {
 					error: aborted$1 ? `Aborted by signal ${signal}` : stderr.trim() || `Process exited with code ${code}`,
 					errorKind: aborted$1 ? "aborted" : "exit_nonzero",
 					sessionId: capturedSessionId,
+					model: capturedModel,
 					persisted,
 					toolUseCount: state.toolUseCount,
 					duration: duration$2,

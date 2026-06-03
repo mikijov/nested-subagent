@@ -99,7 +99,7 @@ This Plugin:     Main → Nested → Isolated Main → Subagent → ✓
 The plugin spawns `claude -p` with `--output-format stream-json` to get real-time progress, matching the native Task tool's behavior:
 
 ```bash
-claude -p "your task" --output-format stream-json --verbose --model opus
+claude -p "your task" --output-format stream-json --verbose --model opus[1m]
 ```
 
 This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) - spawning isolated Claude processes programmatically.
@@ -117,7 +117,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | **Token tracking** | ✅ | ✅ | ✅ Implemented |
 | **Cost tracking** | ✅ | ✅ | ✅ Implemented |
 | **Abort / cancel** | AbortController | SIGTERM / SIGKILL + sibling `AbortTask` tool | ✅ Implemented |
-| **Configurable model** | ❌ | ✅ sonnet / opus / haiku | ✅ Implemented |
+| **Configurable model** | ❌ | ✅ any CLI model + 1M variants | ✅ Implemented |
 | **Configurable timeout** | ❌ | ✅ | ✅ Implemented |
 | **System prompt control** | ❌ | ✅ Full control | ✅ Implemented |
 | **Tool restrictions** | ❌ | ✅ allowed / disallowed | ✅ Implemented |
@@ -144,7 +144,7 @@ This is the same approach as the [Claude Agent SDK](https://docs.anthropic.com/e
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `prompt` | string | **Required.** The task for the agent |
-| `model` | string | `opus` (default), `sonnet`, or `haiku` |
+| `model` | string | Default `opus[1m]` (latest Opus + 1M context). Open-ended, passed verbatim to `--model`: an alias (`opus`/`sonnet`/`haiku`), a full id (`claude-opus-4-8`), or a `[1m]` 1M-context variant (Opus/Sonnet only). Any value the installed `claude` CLI accepts works |
 | `effort` | string | `low` / `medium` / `high` / `xhigh` / `max` — extended thinking budget. Default `xhigh` (always emitted) |
 | `allowWrite` | boolean | Default `false`. Narrow gate on file-modifying tools: when false, `Write`/`Edit`/`NotebookEdit` are appended to `--disallowed-tools` and the subagent is told it is in read-only-files mode. Bash is **not** blocked — shell-based writes (`sed -i`, redirects, `tee`) remain possible |
 | `permissionMode` | string | `acceptEdits` / `auto` / `bypassPermissions` / `default` / `dontAsk` / `plan`. Default `auto`. Mutually exclusive with `dangerouslySkipPermissions` |
@@ -173,7 +173,7 @@ The tool returns a JSON object — same payload in `content[0].text` (compact) a
   "sessionId": "…uuid…",
   "persisted": false,
   "result": "<subagent's final text>",
-  "stats": { "toolUseCount": 5, "durationMs": 45000, "tokens": 12400, "cacheReadTokens": 3200, "costUsd": 0.018, "thinkingBlocks": 2 },
+  "stats": { "toolUseCount": 5, "model": "claude-opus-4-8", "durationMs": 45000, "tokens": 12400, "cacheReadTokens": 3200, "costUsd": 0.018, "thinkingBlocks": 2 },
   "toolUseSummary": [{ "tool": "Bash", "count": 3 }, { "tool": "Read", "count": 2 }],
   "thinkingBlocks": [{ "text": "<subagent's intermediate reasoning…>" }]
 }
